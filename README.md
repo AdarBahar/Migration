@@ -1,6 +1,22 @@
 # 🔁 Redis Sync & Load Testing Toolkit
 
-This project provides a suite of Python tools for working with multiple Redis databases — specifically for **testing**, **sync verification**, and **performance tracking**. The toolkit allows you to:
+![Python](https://img.shields.io/badge/python-3.7%2B-blue?logo=python)
+![Redis](https://img.shields.io/badge/redis-tested-green?logo=redis)
+![License: MIT](https://img.shields.io/badge/license-MIT-lightgrey.svg)
+
+A collection of Python tools to manage, test, and verify synchronization between two Redis databases.
+
+---
+
+## 📦 Requirements
+
+Install required dependencies:
+
+```bash
+pip install -r requirements.txt
+```
+
+---
 
 - 🔍 Compare two Redis databases
     
