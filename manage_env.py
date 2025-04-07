@@ -1,4 +1,6 @@
 import os
+import redis
+import ssl
 from dotenv import load_dotenv, set_key
 from getpass import getpass
 
@@ -22,7 +24,7 @@ def prompt_env(key, label, secret=False, default=None, max_length=None):
             continue
         break
     set_key(ENV_PATH, key, new_value)
-    reload_env()  # Reload environment after setting new value
+    reload_env()
 
 def setup_connection(label_prefix):
     """Prompt user for Redis connection config."""
@@ -54,6 +56,35 @@ def show_current_config():
         print(f"{label}: {value}")
     print("Passwords are hidden for security.\n")
 
+def test_redis_connection(prefix):
+    """Test Redis connectivity using .env settings."""
+    name = os.getenv(f"{prefix}_NAME", prefix)
+    host = os.getenv(f"{prefix}_HOST")
+    port = int(os.getenv(f"{prefix}_PORT", 6379))
+    password = os.getenv(f"{prefix}_PASSWORD") or None
+    use_tls = os.getenv(f"{prefix}_TLS", "false").lower() == "true"
+
+    print(f"\n🔌 Testing connection to {name} ({host}:{port})...")
+
+    try:
+        conn_args = {
+            "host": host,
+            "port": port,
+            "password": password,
+            "decode_responses": True,
+            "socket_timeout": 5,
+            "socket_connect_timeout": 5
+        }
+        if use_tls:
+            conn_args["ssl"] = True
+            conn_args["ssl_cert_reqs"] = ssl.CERT_NONE
+
+        client = redis.Redis(**conn_args)
+        client.ping()
+        print(f"✅ Connection to {name} successful.\n")
+    except Exception as e:
+        print(f"❌ Connection to {name} failed: {e}\n")
+
 def main():
     print("🔐 Redis Environment Configuration Tool")
 
@@ -62,14 +93,20 @@ def main():
         print("Choose an option:")
         print("1. Edit Source Redis")
         print("2. Edit Destination Redis")
-        print("3. Exit")
-        choice = input("Enter choice [1-3]: ").strip()
+        print("3. Test Source Redis")
+        print("4. Test Destination Redis")
+        print("5. Exit")
+        choice = input("Enter choice [1-5]: ").strip()
 
         if choice == "1":
             setup_connection("REDIS_SOURCE")
         elif choice == "2":
             setup_connection("REDIS_DEST")
         elif choice == "3":
+            test_redis_connection("REDIS_SOURCE")
+        elif choice == "4":
+            test_redis_connection("REDIS_DEST")
+        elif choice == "5":
             print("✅ Exiting config tool.")
             break
         else:

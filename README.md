@@ -26,6 +26,7 @@ pip install -r requirements.txt
     
 - 🔧 Easily manage Redis connection settings via a CLI-based `.env` manager
     
+- 📊 Generate fake data for testing using `datafaker`
 
 ---
 
@@ -39,6 +40,7 @@ pip install -r requirements.txt
     
 - Enable secure and reusable connection handling using `.env` files
     
+- Generate realistic test data for Redis using `datafaker`
 
 ---
 
@@ -50,6 +52,7 @@ pip install -r requirements.txt
 |`ReadWriteOps.py`|Run multi-threaded read/write tests on one or both Redis databases, logs latency per op|
 |`flushDBData.py`|Interactively flush one or both databases|
 |`manage_env.py`|CLI tool to manage Redis connection strings and friendly names in a `.env` file|
+|`datafaker.py`|Generate fake data for Redis testing|
 |`.env`|Environment file used by all scripts for Redis configuration (auto-generated/edited)|
 
 ---
@@ -58,11 +61,9 @@ pip install -r requirements.txt
 
 All scripts use a common `.env` file to manage connection details. You can create or update this file by running:
 
-bash
-
-CopyEdit
-
-`python manage_env.py`
+```bash
+python manage_env.py
+```
 
 This lets you define:
 
@@ -76,6 +77,9 @@ This lets you define:
     
 - `REDIS_SOURCE_TLS`, `REDIS_DEST_TLS`
     
+- **New Options**:
+  - `REDIS_SOURCE_DB`, `REDIS_DEST_DB`: Specify the database index for source and destination Redis instances.
+  - `REDIS_TIMEOUT`: Set a timeout value for Redis connections.
 
 ---
 
@@ -98,11 +102,9 @@ This lets you define:
 
 Run it:
 
-bash
-
-CopyEdit
-
-`python DB_compare.py`
+```bash
+python DB_compare.py
+```
 
 ---
 
@@ -121,11 +123,9 @@ CopyEdit
 
 Run it:
 
-bash
-
-CopyEdit
-
-`python ReadWriteOps.py`
+```bash
+python ReadWriteOps.py
+```
 
 ---
 
@@ -142,11 +142,9 @@ CopyEdit
 
 Run it:
 
-bash
-
-CopyEdit
-
-`python flushDBData.py`
+```bash
+python flushDBData.py
+```
 
 ---
 
@@ -158,26 +156,55 @@ CopyEdit
     
 - Friendly name, host, port, password, TLS support
     
+- Specify database index (`REDIS_SOURCE_DB`, `REDIS_DEST_DB`)
+    
+- Set connection timeout (`REDIS_TIMEOUT`)
+    
 - Saves everything to `.env`
     
 
 Run it:
 
-bash
+```bash
+python manage_env.py
+```
 
-CopyEdit
+---
 
-`python manage_env.py`
+### `datafaker.py`
+
+📊 **Generate fake data for Redis testing**
+
+- Populate Redis with random keys and values for testing
+    
+- Supports configurable key patterns, value sizes, and data types
+    
+- Uses `.env` config for connection details
+    
+
+Run it:
+
+```bash
+python datafaker.py
+```
+
+Options:
+
+- `--keys`: Number of keys to generate (default: 1000)
+- `--pattern`: Key pattern (e.g., `user:{id}`)
+- `--value-size`: Size of values in bytes (default: 256)
+- `--data-type`: Type of data to generate (e.g., string, hash, list)
 
 ---
 
 ## 📊 Output Example (CSV log from `ReadWriteOps.py`)
 
-csv
-
-CopyEdit
-
-`timestamp,redis_name,redis_host,operation,latency_ms,key_count,error_message 2025-04-03 13:00:01,AWS Redis,adar-redis...,WRITE,18.2,10, 2025-04-03 13:00:06,AWS Redis,adar-redis...,READ,12.3,10, 2025-04-03 13:01:05,AWS Redis,adar-redis...,WRITE,0,0,ConnectionError: timeout`
+```csv
+timestamp,redis_name,redis_host,operation,latency_ms,key_count,error_message
+2025-04-03 13:00:01,AWS Redis,adar-redis...,WRITE,18.2,10,
+2025-04-03 13:00:06,AWS Redis,adar-redis...,READ,12.3,10,
+2025-04-03 13:01:05,AWS Redis,adar-redis...,WRITE,0,0,ConnectionError: timeout
+```
 
 ---
 
@@ -185,18 +212,15 @@ CopyEdit
 
 Install dependencies:
 
-bash
-
-CopyEdit
-
-`pip install -r requirements.txt`
+```bash
+pip install -r requirements.txt
+```
 
 Required packages:
 
 - `redis`
-    
 - `python-dotenv`
-    
+- `faker`
 
 ---
 
@@ -210,6 +234,7 @@ Required packages:
     
 - Add support for more Redis operations (TTL, expiry tracking, streams)
     
+- Enhance `datafaker` to support more complex data structures
 
 ---
 

@@ -27,6 +27,12 @@ Thumbs.db
 __pycache__/
 *.py[cod]
 
+# Ignore Python virtual environment libraries
+lib/
+Lib/
+bin/
+pyvenv.cfg
+
 # Ignore compiled files
 *.class
 *.o
@@ -49,3 +55,9 @@ pnpm-lock.yaml
 
 # Ignore Git-specific files
 .git/
+
+# Ignore Python virtual environment
+venv/
+
+# Ignore environment files
+.env/
