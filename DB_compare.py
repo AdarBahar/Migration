@@ -17,16 +17,18 @@ def connect_to_redis(name, host, port, password, use_tls):
     """Connect to Redis using provided parameters."""
     print(f"\n⏳ Connecting to {name} Redis at {host}:{port} ...")
     try:
-        connection = redis.Redis(
-            host=host,
-            port=int(port),
-            password=password if password else None,
-            decode_responses=True,
-            socket_connect_timeout=REDIS_TIMEOUT,
-            socket_timeout=REDIS_TIMEOUT,
-            ssl=True if use_tls else False,
-            ssl_cert_reqs=ssl.CERT_NONE if use_tls else None
-        )
+        connection_kwargs = {
+            "host": host,
+            "port": int(port),
+            "decode_responses": True,
+            "socket_connect_timeout": REDIS_TIMEOUT,
+            "socket_timeout": REDIS_TIMEOUT,
+            "ssl": True if use_tls else False,
+            "ssl_cert_reqs": ssl.CERT_NONE if use_tls else None
+        }
+        if password and str(password).strip().lower() != "none":
+            connection_kwargs["password"] = password
+        connection = redis.Redis(**connection_kwargs)
         connection.ping()
         print(f"✅ Connected to {name} Redis\n")
         return connection

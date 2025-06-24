@@ -52,12 +52,12 @@ def connect_to_redis(conf):
     connection_kwargs = {
         "host": conf["host"],
         "port": conf["port"],
-        "password": conf["password"],
         "decode_responses": True,
         "socket_timeout": 5,
         "socket_connect_timeout": 5
     }
-
+    if conf["password"] and str(conf["password"]).strip().lower() != "none":
+        connection_kwargs["password"] = conf["password"]
     if conf["use_tls"]:
         connection_kwargs["ssl"] = True
         connection_kwargs["ssl_cert_reqs"] = ssl.CERT_NONE
