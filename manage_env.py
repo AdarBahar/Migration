@@ -61,7 +61,7 @@ def test_redis_connection(prefix):
     name = os.getenv(f"{prefix}_NAME", prefix)
     host = os.getenv(f"{prefix}_HOST")
     port = int(os.getenv(f"{prefix}_PORT", 6379))
-    password = os.getenv(f"{prefix}_PASSWORD") or None
+    password = os.getenv(f"{prefix}_PASSWORD")
     use_tls = os.getenv(f"{prefix}_TLS", "false").lower() == "true"
 
     print(f"\n🔌 Testing connection to {name} ({host}:{port})...")
@@ -70,11 +70,12 @@ def test_redis_connection(prefix):
         conn_args = {
             "host": host,
             "port": port,
-            "password": password,
             "decode_responses": True,
             "socket_timeout": 5,
             "socket_connect_timeout": 5
         }
+        if password and password.strip().lower() != "none":
+            conn_args["password"] = password
         if use_tls:
             conn_args["ssl"] = True
             conn_args["ssl_cert_reqs"] = ssl.CERT_NONE
