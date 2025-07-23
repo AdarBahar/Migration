@@ -172,13 +172,36 @@ You can launch the entire setup via AWS CloudFormation with a pre-configured tem
 
 ### Required Parameters for CloudFormation:
 
-| Parameter                  | Where to Find It                                                             |
-| -------------------------- | ---------------------------------------------------------------------------- |
-| **KeyName**                | EC2 Console → Network & Security → Key Pairs                                 |
-| **MyIP**                   | Get your public IP at [checkip.amazonaws.com](https://checkip.amazonaws.com) |
-| **VpcId**                  | VPC Console → Your VPCs                                                      |
-| **SubnetId**               | VPC Console → Subnets (must belong to selected VPC)                          |
-| **AmiId**                  | EC2 Console → AMIs → Filter by Canonical + Ubuntu (region-specific)          |
-| **DefaultSecurityGroupId** | VPC Console → Security Groups → Look for `Group Name = default` in your VPC  |
+| Parameter                  | Where to Find It                                                             | Default Value              | Notes                                    |
+| -------------------------- | ---------------------------------------------------------------------------- | -------------------------- | ---------------------------------------- |
+| **KeyName**                | EC2 Console → Network & Security → Key Pairs                                 | (required)                 | Create one if you don't have any        |
+| **MyIP**                   | Get your public IP at [checkip.amazonaws.com](https://checkip.amazonaws.com) | (required)                 | Add '/32' to the end (e.g., 1.2.3.4/32) |
+| **VpcId**                  | VPC Console → Your VPCs                                                      | (required)                 | Use default VPC if unsure               |
+| **SubnetId**               | VPC Console → Subnets (must belong to selected VPC)                          | (required)                 | Choose a public subnet                   |
+| **AmiId**                  | EC2 Console → AMIs → Filter by Canonical + Ubuntu                            | ami-042b4708b1d05f512       | Ubuntu 22.04 LTS (us-east-1)            |
+| **DefaultSecurityGroupId** | VPC Console → Security Groups → Look for `Group Name = default` in your VPC  | (required)                 | Every VPC has a default security group  |
+| **InstanceType**           | Choose instance size                                                         | t3.micro                   | t3.micro is free tier eligible          |
+
+### 💡 Quick Setup Tips:
+
+1. **First time AWS user?** Use your default VPC and any public subnet within it
+2. **Don't have a Key Pair?** Create one in EC2 Console → Key Pairs → Create key pair
+3. **Finding your IP:** Visit [checkip.amazonaws.com](https://checkip.amazonaws.com), copy the IP, and add `/32`
+4. **Default Security Group:** In VPC Console, filter by your VPC ID and look for the group named "default"
+5. **AMI varies by region:** The default AMI is for us-east-1. For other regions, search for "ubuntu/images/hvm-ssd/ubuntu-jammy-22.04"
+
+### 🔍 Step-by-Step Parameter Collection:
+
+**Before launching the CloudFormation stack, gather these values:**
+
+1. **Your Public IP**: Go to https://checkip.amazonaws.com → Copy IP → Add `/32` (e.g., `203.0.113.42/32`)
+
+2. **VPC ID**: AWS Console → VPC → Your VPCs → Copy the VPC ID (starts with `vpc-`)
+
+3. **Subnet ID**: AWS Console → VPC → Subnets → Filter by your VPC → Choose a public subnet → Copy Subnet ID (starts with `subnet-`)
+
+4. **Default Security Group**: AWS Console → VPC → Security Groups → Filter by your VPC → Find group with name "default" → Copy Group ID (starts with `sg-`)
+
+5. **Key Pair**: AWS Console → EC2 → Key Pairs → Create or select existing → Note the name (not the file path)
 
 Happy migrating! 🧠🔁📦

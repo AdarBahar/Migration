@@ -56,7 +56,7 @@ Resources:
   MigrationInstance:
     Type: AWS::EC2::Instance
     Properties:
-      InstanceType: t3.micro
+      InstanceType: !Ref InstanceType
       KeyName: !Ref KeyName
       ImageId: !Ref AmiId
       SubnetId: !Ref SubnetId
@@ -66,22 +66,46 @@ Resources:
       Tags:
         - Key: Name
           Value: MigrationInstance
+        - Key: Project
+          Value: Redis-Migration
+        - Key: Environment
+          Value: Development
       UserData:
         Fn::Base64: !Sub |
           #!/bin/bash
+          # Update system
           apt update -y
           apt upgrade -y
+          
+          # Install required packages
           apt install -y software-properties-common
           add-apt-repository universe -y
           apt update -y
-          apt install -y python3 python3-pip python3-venv git
+          apt install -y python3 python3-pip python3-venv git curl wget
+          
+          # Clone and setup Migration project
           cd /home/ubuntu
           git clone https://github.com/AdarBahar/Migration.git
           cd Migration
+          
+          # Setup Python environment
           python3 -m venv venv
           source venv/bin/activate
           pip install -r requirements.txt
+          
+          # Set proper ownership
           chown -R ubuntu:ubuntu /home/ubuntu/Migration
+          
+          # Create a startup script for convenience
+          cat > /home/ubuntu/start-migration.sh << 'EOF'
+          #!/bin/bash
+          cd /home/ubuntu/Migration
+          source venv/bin/activate
+          echo "🚀 Migration environment ready!"
+          echo "Available scripts: DB_compare.py, ReadWriteOps.py, flushDBData.py, manage_env.py, DataFaker.py"
+          EOF
+          chmod +x /home/ubuntu/start-migration.sh
+          chown ubuntu:ubuntu /home/ubuntu/start-migration.sh
 
 Outputs:
   InstancePublicIP:
