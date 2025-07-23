@@ -8,6 +8,25 @@ A collection of Python tools to manage, test, and verify synchronization between
 
 ---
 
+## 🚀 Quick AWS Setup with CloudFormation
+
+Want to quickly set up an AWS EC2 instance with everything pre-configured? Use our CloudFormation template:
+
+👉 **[Launch Stack](https://console.aws.amazon.com/cloudformation/home?#/stacks/create/review?templateURL=https://adar-testing.s3.eu-north-1.amazonaws.com/migration-instance.yaml)**
+
+📖 **[Detailed Setup Guide](migration-instance.md)** - Complete walkthrough including manual setup steps
+
+The CloudFormation template automatically:
+- Creates an Ubuntu EC2 instance
+- Installs Python, Git, and dependencies
+- Clones this repository
+- Sets up the virtual environment
+- Configures security groups for SSH access
+
+After deployment, simply SSH to your instance and start using the migration tools!
+
+---
+
 ## 📦 Requirements
 
 Install required dependencies:
