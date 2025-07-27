@@ -155,7 +155,6 @@ Resources:
           cat > /home/ubuntu/start-migration.sh << 'EOF'
           #!/bin/bash
           cd /home/ubuntu/Migration
-          source venv/bin/activate
           echo "🚀 Migration environment ready!"
           echo "Available scripts:"
           echo "  • DB_compare.py - Compare Redis databases"
@@ -166,17 +165,48 @@ Resources:
           echo "  • provision_elasticache.py - Create ElastiCache instances"
           echo "  • cleanup_elasticache.py - Remove ElastiCache resources"
           echo ""
-          echo "💡 To activate the virtual environment in your current shell, run:"
-          echo "   source /home/ubuntu/Migration/venv/bin/activate"
+          echo "💡 To activate the virtual environment, run:"
+          echo "   source activate-migration"
           echo ""
-          echo "🔄 Or use this command to start a new shell with venv activated:"
-          echo "   cd /home/ubuntu/Migration && source venv/bin/activate && bash"
+          echo "🔄 Or manually:"
+          echo "   cd /home/ubuntu/Migration && source venv/bin/activate"
           EOF
           chmod +x /home/ubuntu/start-migration.sh
           chown ubuntu:ubuntu /home/ubuntu/start-migration.sh
 
-          # Create an alias for easy activation
-          echo 'alias activate-migration="cd /home/ubuntu/Migration && source venv/bin/activate"' >> /home/ubuntu/.bashrc
+          # Create a proper activation script (not just an alias)
+          cat > /home/ubuntu/activate-migration << 'EOF'
+          #!/bin/bash
+          # This script should be sourced, not executed
+          if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+              echo "⚠️  This script should be sourced, not executed directly."
+              echo "💡 Run: source activate-migration"
+              exit 1
+          fi
+
+          cd /home/ubuntu/Migration
+          source venv/bin/activate
+          echo "✅ Virtual environment activated!"
+          echo "📍 Current directory: $(pwd)"
+          echo "🐍 Python: $(which python)"
+          EOF
+          chmod +x /home/ubuntu/activate-migration
+          chown ubuntu:ubuntu /home/ubuntu/activate-migration
+
+          # Add the activation script to PATH and create alias
+          echo 'export PATH="/home/ubuntu:$PATH"' >> /home/ubuntu/.bashrc
+          echo 'alias activate-migration="source /home/ubuntu/activate-migration"' >> /home/ubuntu/.bashrc
+
+          # Also create a direct activation command
+          cat > /home/ubuntu/migration << 'EOF'
+          #!/bin/bash
+          cd /home/ubuntu/Migration
+          source venv/bin/activate
+          exec bash --rcfile <(echo "PS1='(migration) \u@\h:\w\$ '")
+          EOF
+          chmod +x /home/ubuntu/migration
+          chown ubuntu:ubuntu /home/ubuntu/migration
+
           chown ubuntu:ubuntu /home/ubuntu/.bashrc
 
 Outputs:
