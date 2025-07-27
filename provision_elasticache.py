@@ -36,19 +36,21 @@ class ElastiCacheProvisioner:
     def __init__(self):
         """Initialize the ElastiCache provisioner with AWS clients."""
         try:
-            # Initialize AWS clients
-            self.ec2_client = boto3.client('ec2')
-            self.elasticache_client = boto3.client('elasticache')
-            self.sts_client = boto3.client('sts')
-            
-            # Get current AWS account and region info
+            # Get region from EC2 metadata or default
+            self.region = self.get_current_region()
+
+            # Initialize AWS clients with explicit region
+            self.ec2_client = boto3.client('ec2', region_name=self.region)
+            self.elasticache_client = boto3.client('elasticache', region_name=self.region)
+            self.sts_client = boto3.client('sts', region_name=self.region)
+
+            # Get current AWS account info
             self.account_id = self.sts_client.get_caller_identity()['Account']
-            self.region = boto3.Session().region_name or 'us-east-1'
-            
+
             print(f"✅ AWS clients initialized successfully")
             print(f"📍 Account: {self.account_id}")
             print(f"📍 Region: {self.region}")
-            
+
         except NoCredentialsError:
             print("❌ AWS credentials not found!")
             print("💡 Make sure to configure AWS credentials using one of:")
@@ -59,6 +61,49 @@ class ElastiCacheProvisioner:
         except Exception as e:
             print(f"❌ Failed to initialize AWS clients: {e}")
             sys.exit(1)
+
+    def get_current_region(self):
+        """Get the current AWS region from various sources."""
+        try:
+            # Try to get region from EC2 metadata (works on EC2 instances)
+            import urllib.request
+            import urllib.error
+
+            try:
+                region = urllib.request.urlopen(
+                    'http://169.254.169.254/latest/meta-data/placement/region',
+                    timeout=2
+                ).read().decode()
+                print(f"🌍 Detected region from EC2 metadata: {region}")
+                return region
+            except (urllib.error.URLError, urllib.error.HTTPError):
+                pass
+
+            # Try to get from boto3 session
+            session = boto3.Session()
+            if session.region_name:
+                print(f"🌍 Using region from boto3 session: {session.region_name}")
+                return session.region_name
+
+            # Try to get from AWS CLI config
+            try:
+                import subprocess
+                result = subprocess.run(['aws', 'configure', 'get', 'region'],
+                                      capture_output=True, text=True, timeout=5)
+                if result.returncode == 0 and result.stdout.strip():
+                    region = result.stdout.strip()
+                    print(f"🌍 Using region from AWS CLI config: {region}")
+                    return region
+            except:
+                pass
+
+            # Default to us-east-1
+            print(f"🌍 Using default region: us-east-1")
+            return 'us-east-1'
+
+        except Exception as e:
+            print(f"⚠️  Could not determine region, using default: us-east-1")
+            return 'us-east-1'
 
     def get_current_instance_info(self):
         """Get information about the current EC2 instance."""
@@ -205,14 +250,52 @@ class ElastiCacheProvisioner:
             print(f"❌ Failed to create subnet group: {e}")
             return None
 
-    def create_elasticache_cluster(self, cluster_id, security_group_id, subnet_group_name, 
-                                 node_type='cache.t3.micro', engine_version='7.0'):
-        """Create ElastiCache Redis cluster."""
+    def create_elasticache_serverless(self, cache_name, security_group_id, subnet_group_name):
+        """Create ElastiCache Serverless Redis cache."""
+        try:
+            print(f"🚀 Creating ElastiCache Serverless Redis cache: {cache_name}")
+            print(f"📍 Engine: Redis OSS")
+            print(f"📍 Type: Serverless")
+
+            response = self.elasticache_client.create_serverless_cache(
+                ServerlessCacheName=cache_name,
+                Description="Migration testing",
+                Engine='redis',
+                CacheUsageLimits={
+                    'DataStorage': {
+                        'Maximum': 1,
+                        'Unit': 'GB'
+                    },
+                    'ECPUPerSecond': {
+                        'Maximum': 1000
+                    }
+                },
+                SecurityGroupIds=[security_group_id],
+                SubnetIds=self.get_subnet_ids_from_group(subnet_group_name),
+                Tags=[
+                    {'Key': 'Name', 'Value': f'Source-ElastiCache'},
+                    {'Key': 'Purpose', 'Value': 'Migration Testing'},
+                    {'Key': 'CreatedBy', 'Value': 'Migration-Tool'},
+                    {'Key': 'Environment', 'Value': 'Development'}
+                ]
+            )
+
+            print(f"✅ ElastiCache Serverless cache creation initiated: {cache_name}")
+            return cache_name
+
+        except Exception as e:
+            print(f"❌ Failed to create ElastiCache Serverless cache: {e}")
+            print(f"💡 Falling back to traditional cluster...")
+            return self.create_elasticache_cluster_fallback(cache_name, security_group_id, subnet_group_name)
+
+    def create_elasticache_cluster_fallback(self, cluster_id, security_group_id, subnet_group_name,
+                                          node_type='cache.t3.micro', engine_version='7.0'):
+        """Create traditional ElastiCache Redis cluster as fallback."""
         try:
             print(f"🚀 Creating ElastiCache Redis cluster: {cluster_id}")
             print(f"📍 Node Type: {node_type}")
             print(f"📍 Engine Version: {engine_version}")
-            
+
             response = self.elasticache_client.create_cache_cluster(
                 CacheClusterId=cluster_id,
                 Engine='redis',
@@ -223,101 +306,151 @@ class ElastiCacheProvisioner:
                 CacheSubnetGroupName=subnet_group_name,
                 SecurityGroupIds=[security_group_id],
                 Tags=[
-                    {'Key': 'Name', 'Value': f'Redis-{cluster_id}'},
+                    {'Key': 'Name', 'Value': f'Source-ElastiCache'},
                     {'Key': 'Purpose', 'Value': 'Migration Testing'},
                     {'Key': 'CreatedBy', 'Value': 'Migration-Tool'},
                     {'Key': 'Environment', 'Value': 'Development'}
                 ]
             )
-            
+
             print(f"✅ ElastiCache cluster creation initiated: {cluster_id}")
             return cluster_id
-            
+
         except Exception as e:
             print(f"❌ Failed to create ElastiCache cluster: {e}")
             return None
 
-    def wait_for_cluster_available(self, cluster_id, timeout_minutes=15):
-        """Wait for ElastiCache cluster to become available."""
-        print(f"⏳ Waiting for cluster {cluster_id} to become available...")
+    def get_subnet_ids_from_group(self, subnet_group_name):
+        """Get subnet IDs from a subnet group."""
+        try:
+            response = self.elasticache_client.describe_cache_subnet_groups(
+                CacheSubnetGroupName=subnet_group_name
+            )
+
+            subnet_group = response['CacheSubnetGroups'][0]
+            subnet_ids = [subnet['SubnetId'] for subnet in subnet_group['Subnets']]
+            return subnet_ids
+
+        except Exception as e:
+            print(f"⚠️  Could not get subnet IDs from group: {e}")
+            return []
+
+    def wait_for_cache_available(self, cache_name, is_serverless=True, timeout_minutes=15):
+        """Wait for ElastiCache (serverless or cluster) to become available."""
+        cache_type = "serverless cache" if is_serverless else "cluster"
+        print(f"⏳ Waiting for {cache_type} {cache_name} to become available...")
         print(f"⏱️  Timeout: {timeout_minutes} minutes")
-        
+
         start_time = time.time()
         timeout_seconds = timeout_minutes * 60
-        
+
         while time.time() - start_time < timeout_seconds:
             try:
-                response = self.elasticache_client.describe_cache_clusters(
-                    CacheClusterId=cluster_id,
-                    ShowCacheNodeInfo=True
-                )
-                
-                cluster = response['CacheClusters'][0]
-                status = cluster['CacheClusterStatus']
-                
-                print(f"📊 Cluster status: {status}")
-                
-                if status == 'available':
-                    endpoint = cluster['CacheNodes'][0]['Endpoint']
-                    print(f"✅ Cluster is available!")
-                    print(f"📍 Endpoint: {endpoint['Address']}:{endpoint['Port']}")
-                    return {
-                        'endpoint': endpoint['Address'],
-                        'port': endpoint['Port'],
-                        'status': status
-                    }
-                elif status in ['failed', 'incompatible-parameters', 'incompatible-network']:
-                    print(f"❌ Cluster creation failed with status: {status}")
-                    return None
-                
+                if is_serverless:
+                    # Check serverless cache status
+                    response = self.elasticache_client.describe_serverless_caches(
+                        ServerlessCacheName=cache_name
+                    )
+
+                    cache = response['ServerlessCaches'][0]
+                    status = cache['Status']
+
+                    print(f"📊 Serverless cache status: {status}")
+
+                    if status == 'available':
+                        endpoint = cache['Endpoint']
+                        print(f"✅ Serverless cache is available!")
+                        print(f"📍 Endpoint: {endpoint['Address']}:{endpoint['Port']}")
+                        return {
+                            'endpoint': endpoint['Address'],
+                            'port': endpoint['Port'],
+                            'status': status,
+                            'type': 'serverless'
+                        }
+                    elif status in ['failed', 'deleting']:
+                        print(f"❌ Serverless cache creation failed with status: {status}")
+                        return None
+                else:
+                    # Check traditional cluster status
+                    response = self.elasticache_client.describe_cache_clusters(
+                        CacheClusterId=cache_name,
+                        ShowCacheNodeInfo=True
+                    )
+
+                    cluster = response['CacheClusters'][0]
+                    status = cluster['CacheClusterStatus']
+
+                    print(f"📊 Cluster status: {status}")
+
+                    if status == 'available':
+                        endpoint = cluster['CacheNodes'][0]['Endpoint']
+                        print(f"✅ Cluster is available!")
+                        print(f"📍 Endpoint: {endpoint['Address']}:{endpoint['Port']}")
+                        return {
+                            'endpoint': endpoint['Address'],
+                            'port': endpoint['Port'],
+                            'status': status,
+                            'type': 'cluster'
+                        }
+                    elif status in ['failed', 'incompatible-parameters', 'incompatible-network']:
+                        print(f"❌ Cluster creation failed with status: {status}")
+                        return None
+
                 time.sleep(30)  # Wait 30 seconds before checking again
-                
+
             except Exception as e:
-                print(f"⚠️  Error checking cluster status: {e}")
+                print(f"⚠️  Error checking {cache_type} status: {e}")
                 time.sleep(30)
-        
-        print(f"⏰ Timeout waiting for cluster to become available")
+
+        print(f"⏰ Timeout waiting for {cache_type} to become available")
         return None
 
-    def generate_env_config(self, cluster_info, cluster_id):
-        """Generate .env configuration for the ElastiCache cluster."""
+    def generate_env_config(self, cache_info, cache_name):
+        """Generate .env configuration for the ElastiCache cache."""
+        cache_type = "Serverless" if cache_info.get('type') == 'serverless' else "Cluster"
         config_lines = [
             f"# ElastiCache Redis Configuration - Generated {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
-            f"# Cluster ID: {cluster_id}",
+            f"# Cache Name: {cache_name}",
+            f"# Type: Redis OSS {cache_type}",
+            f"# Description: Migration testing",
             f"",
-            f"# ElastiCache Redis (Destination)",
-            f"REDIS_DEST_NAME=ElastiCache-{cluster_id}",
-            f"REDIS_DEST_HOST={cluster_info['endpoint']}",
-            f"REDIS_DEST_PORT={cluster_info['port']}",
-            f"REDIS_DEST_PASSWORD=",
-            f"REDIS_DEST_TLS=false",
-            f"REDIS_DEST_DB=0",
+            f"# ElastiCache Redis (Source)",
+            f"REDIS_SOURCE_NAME={cache_name}",
+            f"REDIS_SOURCE_HOST={cache_info['endpoint']}",
+            f"REDIS_SOURCE_PORT={cache_info['port']}",
+            f"REDIS_SOURCE_PASSWORD=",
+            f"REDIS_SOURCE_TLS=false",
+            f"REDIS_SOURCE_DB=0",
             f"",
             f"# Connection timeout",
             f"REDIS_TIMEOUT=5",
+            f"",
+            f"# Note: Configure your destination Redis using manage_env.py",
             f""
         ]
 
         return "\n".join(config_lines)
 
-    def save_cluster_info(self, cluster_id, cluster_info, security_group_id, subnet_group_name):
-        """Save cluster information to a file for future reference."""
+    def save_cache_info(self, cache_name, cache_info, security_group_id, subnet_group_name):
+        """Save cache information to a file for future reference."""
         info = {
-            'cluster_id': cluster_id,
-            'endpoint': cluster_info['endpoint'],
-            'port': cluster_info['port'],
+            'cache_name': cache_name,
+            'cache_type': cache_info.get('type', 'cluster'),
+            'endpoint': cache_info['endpoint'],
+            'port': cache_info['port'],
             'security_group_id': security_group_id,
             'subnet_group_name': subnet_group_name,
             'created_at': datetime.now().isoformat(),
             'region': self.region,
-            'account_id': self.account_id
+            'account_id': self.account_id,
+            'description': 'Migration testing'
         }
 
-        filename = f"elasticache_cluster_{cluster_id}.json"
+        filename = f"elasticache_{cache_name.replace('-', '_')}.json"
         with open(filename, 'w') as f:
             json.dump(info, f, indent=2)
 
-        print(f"💾 Cluster information saved to: {filename}")
+        print(f"💾 Cache information saved to: {filename}")
         return filename
 
     def provision_elasticache(self, config=None, interactive=True):
@@ -380,62 +513,69 @@ class ElastiCacheProvisioner:
         if not subnet_group_name:
             return False
 
-        # Step 5: Create ElastiCache cluster
-        cluster_id = f"redis-migration-{int(time.time())}"
-        print(f"\n📋 Creating ElastiCache cluster...")
+        # Step 5: Create ElastiCache (Serverless by default)
+        cache_name = "Source-ElastiCache"
+        print(f"\n📋 Creating ElastiCache...")
 
-        if not self.create_elasticache_cluster(
-            cluster_id,
+        # Try serverless first, fallback to cluster if needed
+        created_cache = self.create_elasticache_serverless(
+            cache_name,
             security_group_id,
-            subnet_group_name,
-            node_type=config['node_type'],
-            engine_version=config['engine_version']
-        ):
+            subnet_group_name
+        )
+
+        if not created_cache:
             return False
 
-        # Step 6: Wait for cluster to be available
-        print(f"\n📋 Waiting for cluster to become available...")
-        cluster_info = self.wait_for_cluster_available(cluster_id)
-        if not cluster_info:
-            print("❌ Cluster did not become available within timeout period")
+        # Determine if it's serverless or cluster
+        is_serverless = created_cache == cache_name
+
+        # Step 6: Wait for cache to be available
+        print(f"\n📋 Waiting for cache to become available...")
+        cache_info = self.wait_for_cache_available(created_cache, is_serverless)
+        if not cache_info:
+            print("❌ Cache did not become available within timeout period")
             return False
 
         # Step 7: Generate configuration
         print(f"\n📋 Generating configuration...")
-        env_config = self.generate_env_config(cluster_info, cluster_id)
+        env_config = self.generate_env_config(cache_info, created_cache)
 
         # Save to file
-        env_filename = f"elasticache_{cluster_id}.env"
+        env_filename = f"elasticache_{created_cache.replace('-', '_')}.env"
         with open(env_filename, 'w') as f:
             f.write(env_config)
 
-        # Save cluster info
-        info_filename = self.save_cluster_info(cluster_id, cluster_info, security_group_id, subnet_group_name)
+        # Save cache info
+        info_filename = self.save_cache_info(created_cache, cache_info, security_group_id, subnet_group_name)
 
         # Step 8: Display success information
+        cache_type = "Serverless Cache" if cache_info.get('type') == 'serverless' else "Redis Cluster"
         print("\n" + "=" * 60)
-        print("🎉 ElastiCache Redis cluster provisioned successfully!")
+        print(f"🎉 ElastiCache {cache_type} provisioned successfully!")
         print("=" * 60)
-        print(f"📍 Cluster ID: {cluster_id}")
-        print(f"📍 Endpoint: {cluster_info['endpoint']}:{cluster_info['port']}")
+        print(f"📍 Cache Name: {created_cache}")
+        print(f"📍 Type: Redis OSS {cache_type}")
+        print(f"📍 Endpoint: {cache_info['endpoint']}:{cache_info['port']}")
         print(f"📍 Security Group: {security_group_id}")
         print(f"📍 Subnet Group: {subnet_group_name}")
         print(f"📍 Region: {self.region}")
         print("")
         print("📁 Files created:")
         print(f"   - {env_filename} (Environment configuration)")
-        print(f"   - {info_filename} (Cluster information)")
+        print(f"   - {info_filename} (Cache information)")
         print("")
         print("🔧 Next steps:")
         print("1. Copy the configuration from the .env file to your main .env file")
-        print("2. Use manage_env.py to configure source Redis if needed")
+        print("2. Use manage_env.py to configure destination Redis if needed")
         print("3. Test connection with DB_compare.py or ReadWriteOps.py")
         print("")
-        print("💡 To connect to this Redis cluster:")
-        print(f"   Host: {cluster_info['endpoint']}")
-        print(f"   Port: {cluster_info['port']}")
+        print("💡 To connect to this Redis cache:")
+        print(f"   Host: {cache_info['endpoint']}")
+        print(f"   Port: {cache_info['port']}")
         print(f"   Password: (none)")
         print(f"   TLS: No")
+        print(f"   Description: Migration testing")
 
         return True
 
