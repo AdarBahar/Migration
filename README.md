@@ -16,14 +16,32 @@ Want to quickly set up an AWS EC2 instance with everything pre-configured? Use o
 
 📖 **[Detailed Setup Guide](migration-instance.md)** - Complete walkthrough including manual setup steps
 
-The CloudFormation template automatically:
-- Creates an Ubuntu EC2 instance
-- Installs Python, Git, and dependencies
-- Clones this repository
-- Sets up the virtual environment
-- Configures security groups for SSH access
+### ✨ What the CloudFormation Template Does:
+- **Creates Ubuntu EC2 instance** with default AMI `ami-042b4708b1d05f512` (Ubuntu 22.04 LTS)
+- **Default stack name**: `Redis-Migration-Tool`
+- **Installs all dependencies**: Python 3, pip, venv, Git, curl, wget
+- **Clones this repository** automatically
+- **Sets up virtual environment** and installs requirements
+- **Configures security groups** for SSH access from your IP
+- **Creates convenience scripts** for easy environment activation
+- **Sets proper file ownership** for the ubuntu user
 
-After deployment, simply SSH to your instance and start using the migration tools!
+### 🎯 After Deployment:
+1. **SSH to your instance**: `ssh -i /path/to/your-key.pem ubuntu@<public-ip>`
+2. **Activate environment**: `cd Migration && source venv/bin/activate`
+3. **Start using tools**: `python manage_env.py` to configure Redis connections
+
+### 💡 Quick Environment Activation:
+```bash
+# Method 1: Manual activation (recommended)
+cd /home/ubuntu/Migration && source venv/bin/activate
+
+# Method 2: Use the convenience alias (after logout/login)
+activate-migration
+
+# Method 3: Run the info script
+./start-migration.sh
+```
 
 ---
 

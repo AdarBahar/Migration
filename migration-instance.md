@@ -164,23 +164,37 @@ Here’s what each script does in the `Migration` project:
 
 ---
 
-## 📦 Launch with CloudFormation
+## 📦 Launch with CloudFormation (Recommended)
 
-You can launch the entire setup via AWS CloudFormation with a pre-configured template:
+🚀 **Skip manual setup entirely!** Launch the entire environment via AWS CloudFormation with our pre-configured template:
 
 👉 [Click here to launch the stack](https://console.aws.amazon.com/cloudformation/home?#/stacks/create/review?templateURL=https://adar-testing.s3.eu-north-1.amazonaws.com/migration-instance.yaml)
 
-### Required Parameters for CloudFormation:
+### ✨ What the CloudFormation Template Automatically Does:
+- ✅ **Creates Ubuntu EC2 instance** (t3.micro by default, free tier eligible)
+- ✅ **Uses default AMI**: `ami-042b4708b1d05f512` (Ubuntu 22.04 LTS in us-east-1)
+- ✅ **Default stack name**: `Redis-Migration-Tool`
+- ✅ **Updates system packages** (`apt update && upgrade`)
+- ✅ **Installs all dependencies**: Python 3, pip, venv, Git, curl, wget
+- ✅ **Clones this repository** from GitHub
+- ✅ **Creates virtual environment** and installs requirements
+- ✅ **Sets up security group** for SSH access from your IP only
+- ✅ **Creates convenience scripts** for easy environment activation
+- ✅ **Sets proper file ownership** for ubuntu user
+- ✅ **Ensures public IP assignment** (requires public subnet with auto-assign enabled)
+
+### CloudFormation Parameters:
 
 | Parameter                  | Where to Find It                                                             | Default Value              | Notes                                    |
 | -------------------------- | ---------------------------------------------------------------------------- | -------------------------- | ---------------------------------------- |
+| **StackName**              | Automatically set                                                            | `Redis-Migration-Tool`     | Used for resource naming and tagging    |
 | **KeyName**                | EC2 Console → Network & Security → Key Pairs                                 | (required)                 | Create one if you don't have any        |
 | **MyIP**                   | Get your public IP at [checkip.amazonaws.com](https://checkip.amazonaws.com) | (required)                 | Add '/32' to the end (e.g., 1.2.3.4/32) |
 | **VpcId**                  | VPC Console → Your VPCs                                                      | (required)                 | Use default VPC if unsure               |
-| **SubnetId**               | VPC Console → Subnets (must belong to selected VPC)                          | (required)                 | Choose a public subnet                   |
-| **AmiId**                  | EC2 Console → AMIs → Filter by Canonical + Ubuntu                            | ami-042b4708b1d05f512       | Ubuntu 22.04 LTS (us-east-1)            |
+| **SubnetId**               | VPC Console → Subnets (must belong to selected VPC)                          | (required)                 | ⚠️ Must be PUBLIC subnet with auto-assign IP enabled |
+| **AmiId**                  | EC2 Console → AMIs → Filter by Canonical + Ubuntu                            | `ami-042b4708b1d05f512`    | Ubuntu 22.04 LTS (us-east-1 region)     |
 | **DefaultSecurityGroupId** | VPC Console → Security Groups → Look for `Group Name = default` in your VPC  | (required)                 | Every VPC has a default security group  |
-| **InstanceType**           | Choose instance size                                                         | t3.micro                   | t3.micro is free tier eligible          |
+| **InstanceType**           | Choose instance size                                                         | `t3.micro`                 | t3.micro is free tier eligible          |
 
 ### 💡 Quick Setup Tips:
 
@@ -203,5 +217,51 @@ You can launch the entire setup via AWS CloudFormation with a pre-configured tem
 4. **Default Security Group**: AWS Console → VPC → Security Groups → Filter by your VPC → Find group with name "default" → Copy Group ID (starts with `sg-`)
 
 5. **Key Pair**: AWS Console → EC2 → Key Pairs → Create or select existing → Note the name (not the file path)
+
+### 🎯 After CloudFormation Deployment:
+
+Once your stack is deployed successfully:
+
+1. **Get the public IP** from the CloudFormation Outputs tab
+2. **SSH to your instance**:
+   ```bash
+   ssh -i /path/to/your-key.pem ubuntu@<public-ip>
+   ```
+
+3. **Activate the virtual environment** using one of these methods:
+
+   **Method 1: Manual activation (recommended)**
+   ```bash
+   cd /home/ubuntu/Migration
+   source venv/bin/activate
+   ```
+
+   **Method 2: Use the convenience alias**
+   ```bash
+   # After logout/login, you can use:
+   activate-migration
+   ```
+
+   **Method 3: Get information and instructions**
+   ```bash
+   ./start-migration.sh
+   ```
+
+4. **Verify everything is working**:
+   ```bash
+   # Check Python environment
+   which python
+   # Should show: /home/ubuntu/Migration/venv/bin/python
+
+   # Start configuring Redis connections
+   python manage_env.py
+   ```
+
+### 🔧 Virtual Environment Notes:
+
+- **The venv is pre-installed** but needs to be activated in each SSH session
+- **All dependencies are already installed** (redis, python-dotenv, faker)
+- **The convenience script** `./start-migration.sh` provides activation instructions
+- **An alias** `activate-migration` is available after logout/login
 
 Happy migrating! 🧠🔁📦
