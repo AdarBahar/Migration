@@ -2,7 +2,39 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: Provision an EC2 instance for the Migration project with Python and Git preconfigured.
 
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: "Stack Configuration"
+        Parameters:
+          - StackName
+      - Label:
+          default: "Network Configuration"
+        Parameters:
+          - VpcId
+          - SubnetId
+          - DefaultSecurityGroupId
+          - MyIP
+      - Label:
+          default: "Instance Configuration"
+        Parameters:
+          - KeyName
+          - InstanceType
+          - AmiId
+
 Parameters:
+  StackName:
+    Type: String
+    Default: Redis-Migration-Tool
+    Description: >
+      Name for this CloudFormation stack.
+      📍 This will be used as the stack identifier in AWS Console
+    MinLength: 1
+    MaxLength: 128
+    AllowedPattern: "^[a-zA-Z][-a-zA-Z0-9]*$"
+    ConstraintDescription: Must begin with a letter and contain only alphanumeric characters and hyphens
+
   KeyName:
     Type: AWS::EC2::KeyPair::KeyName
     Description: >
@@ -31,8 +63,10 @@ Parameters:
 
   AmiId:
     Type: AWS::EC2::Image::Id
+    Default: ami-042b4708b1d05f512
     Description: >
-      Ubuntu AMI ID to use (e.g., Ubuntu 22.04 LTS).
+      Ubuntu AMI ID to use (Ubuntu 22.04 LTS).
+      📍 Default: ami-042b4708b1d05f512 (Ubuntu 22.04 LTS in us-east-1)
       📍 AWS Console > EC2 > AMIs (filter by Canonical + Ubuntu)
 
   DefaultSecurityGroupId:
@@ -78,9 +112,9 @@ Resources:
         - !Ref DefaultSecurityGroupId
       Tags:
         - Key: Name
-          Value: MigrationInstance
+          Value: !Sub "${StackName}-Instance"
         - Key: Project
-          Value: Redis-Migration
+          Value: !Ref StackName
         - Key: Environment
           Value: Development
       UserData:
