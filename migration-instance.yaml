@@ -41,6 +41,19 @@ Parameters:
       The default security group ID of the VPC.
       📍 AWS Console > VPC > Security Groups (Group Name: 'default' for your VPC)
 
+  InstanceType:
+    Type: String
+    Default: t3.micro
+    Description: >
+      EC2 instance type for the migration instance.
+      📍 t3.micro is free tier eligible
+    AllowedValues:
+      - t3.micro
+      - t3.small
+      - t3.medium
+      - t3.large
+    ConstraintDescription: Must be a valid EC2 instance type
+
 Resources:
   MigrationSecurityGroup:
     Type: AWS::EC2::SecurityGroup
