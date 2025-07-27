@@ -216,4 +216,7 @@ Outputs:
 
   SSHCommand:
     Description: SSH command to connect
-    Value: !Sub ssh -i /path/to/${KeyName}.pem ubuntu@${MigrationInstance.PublicIp}
+    Value: !Sub
+      - ssh -i /path/to/${KeyName}.pem ubuntu@${PublicIp}
+      - KeyName: !Ref KeyName
+        PublicIp: !GetAtt MigrationInstance.PublicIp
