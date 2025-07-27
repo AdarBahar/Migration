@@ -120,7 +120,7 @@ Resources:
         - Key: Environment
           Value: Development
       UserData:
-        Fn::Base64: !Sub |
+        Fn::Base64: |
           #!/bin/bash
           # Update system
           apt update -y
