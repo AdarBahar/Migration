@@ -178,7 +178,7 @@ Resources:
           cat > /home/ubuntu/activate-migration << 'EOF'
           #!/bin/bash
           # This script should be sourced, not executed
-          if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+          if [[ "$${BASH_SOURCE[0]}" == "$${0}" ]]; then
               echo "⚠️  This script should be sourced, not executed directly."
               echo "💡 Run: source activate-migration"
               exit 1
@@ -187,14 +187,14 @@ Resources:
           cd /home/ubuntu/Migration
           source venv/bin/activate
           echo "✅ Virtual environment activated!"
-          echo "📍 Current directory: $(pwd)"
-          echo "🐍 Python: $(which python)"
+          echo "📍 Current directory: $$(pwd)"
+          echo "🐍 Python: $$(which python)"
           EOF
           chmod +x /home/ubuntu/activate-migration
           chown ubuntu:ubuntu /home/ubuntu/activate-migration
 
           # Add the activation script to PATH and create alias
-          echo 'export PATH="/home/ubuntu:$PATH"' >> /home/ubuntu/.bashrc
+          echo 'export PATH="/home/ubuntu:$$PATH"' >> /home/ubuntu/.bashrc
           echo 'alias activate-migration="source /home/ubuntu/activate-migration"' >> /home/ubuntu/.bashrc
 
           # Also create a direct activation command
@@ -202,7 +202,7 @@ Resources:
           #!/bin/bash
           cd /home/ubuntu/Migration
           source venv/bin/activate
-          exec bash --rcfile <(echo "PS1='(migration) \u@\h:\w\$ '")
+          exec bash --rcfile <(echo "PS1='(migration) \\u@\\h:\\w\\$$ '")
           EOF
           chmod +x /home/ubuntu/migration
           chown ubuntu:ubuntu /home/ubuntu/migration
