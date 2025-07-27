@@ -60,6 +60,8 @@ Parameters:
     Description: >
       The Subnet ID where the instance will be launched.
       📍 AWS Console > VPC > Subnets (must belong to the above VPC)
+      ⚠️  IMPORTANT: Must be a PUBLIC subnet with "Auto-assign public IPv4 address" ENABLED
+      📍 To enable: Select subnet > Actions > Modify auto-assign IP settings > Enable
 
   AmiId:
     Type: AWS::EC2::Image::Id
@@ -107,7 +109,6 @@ Resources:
       KeyName: !Ref KeyName
       ImageId: !Ref AmiId
       SubnetId: !Ref SubnetId
-      AssociatePublicIpAddress: true
       SecurityGroupIds:
         - !Ref MigrationSecurityGroup
         - !Ref DefaultSecurityGroupId
