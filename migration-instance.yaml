@@ -141,6 +141,12 @@ Resources:
           python3 -m venv venv
           source venv/bin/activate
           pip install -r requirements.txt
+
+          # Install AWS CLI for easier AWS management
+          curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+          unzip awscliv2.zip
+          ./aws/install
+          rm -rf aws awscliv2.zip
           
           # Set proper ownership
           chown -R ubuntu:ubuntu /home/ubuntu/Migration
@@ -151,7 +157,14 @@ Resources:
           cd /home/ubuntu/Migration
           source venv/bin/activate
           echo "🚀 Migration environment ready!"
-          echo "Available scripts: DB_compare.py, ReadWriteOps.py, flushDBData.py, manage_env.py, DataFaker.py"
+          echo "Available scripts:"
+          echo "  • DB_compare.py - Compare Redis databases"
+          echo "  • ReadWriteOps.py - Performance testing"
+          echo "  • flushDBData.py - Database cleanup"
+          echo "  • manage_env.py - Environment configuration"
+          echo "  • DataFaker.py - Generate test data"
+          echo "  • provision_elasticache.py - Create ElastiCache instances"
+          echo "  • cleanup_elasticache.py - Remove ElastiCache resources"
           echo ""
           echo "💡 To activate the virtual environment in your current shell, run:"
           echo "   source /home/ubuntu/Migration/venv/bin/activate"
