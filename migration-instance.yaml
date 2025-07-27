@@ -124,20 +124,9 @@ Resources:
         - Key: Environment
           Value: Development
       UserData:
-        Fn::Base64: !Sub
-          - |
-            #!/bin/bash
-            set -e  # Exit on any error
-
-            # Function to signal CloudFormation on exit
-            function signal_cloudformation() {
-                local exit_code=$?
-                echo "Signaling CloudFormation with exit code: $exit_code"
-                cfn-signal -e $exit_code --stack ${StackName} --resource MigrationInstance --region ${Region}
-            }
-
-            # Set trap to signal CloudFormation on script exit
-            trap signal_cloudformation EXIT
+        Fn::Base64: |
+          #!/bin/bash
+          set -e  # Exit on any error
 
             # Update system
             apt update -y
@@ -233,8 +222,25 @@ Resources:
             # All installation completed successfully!
             echo "✅ All installation completed successfully!"
             echo "🎉 Migration environment is ready for use!"
-          - StackName: !Ref "AWS::StackName"
-            Region: !Ref "AWS::Region"
+
+          # Signal CloudFormation that setup is complete
+          # Get instance metadata for signaling
+          INSTANCE_ID=$(curl -s http://169.254.169.254/latest/meta-data/instance-id)
+          REGION=$(curl -s http://169.254.169.254/latest/meta-data/placement/region)
+
+          # Signal success to CloudFormation (if cfn-signal is available)
+          if command -v cfn-signal >/dev/null 2>&1; then
+              # Try to get stack name from tags
+              STACK_NAME=$(aws ec2 describe-tags --region $REGION --filters "Name=resource-id,Values=$INSTANCE_ID" "Name=key,Values=aws:cloudformation:stack-name" --query 'Tags[0].Value' --output text 2>/dev/null || echo "unknown")
+              if [ "$STACK_NAME" != "unknown" ] && [ "$STACK_NAME" != "None" ]; then
+                  cfn-signal -e $? --stack $STACK_NAME --resource MigrationInstance --region $REGION
+                  echo "✅ CloudFormation signal sent successfully"
+              else
+                  echo "⚠️  Could not determine stack name for signaling"
+              fi
+          else
+              echo "⚠️  cfn-signal not available, skipping CloudFormation signaling"
+          fi
 
 Outputs:
   InstancePublicIP:
