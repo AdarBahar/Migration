@@ -91,6 +91,35 @@ Parameters:
     ConstraintDescription: Must be a valid EC2 instance type
 
 Resources:
+  MigrationInstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
+      Policies:
+        - PolicyName: CloudFormationSignaling
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - cloudformation:SignalResource
+                  - ec2:DescribeTags
+                Resource: '*'
+
+  MigrationInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref MigrationInstanceRole
+
   MigrationSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
@@ -113,6 +142,7 @@ Resources:
       KeyName: !Ref KeyName
       ImageId: !Ref AmiId
       SubnetId: !Ref SubnetId
+      IamInstanceProfile: !Ref MigrationInstanceProfile
       SecurityGroupIds:
         - !Ref MigrationSecurityGroup
         - !Ref DefaultSecurityGroupId
@@ -141,6 +171,9 @@ Resources:
             # Install CloudFormation helper scripts
             apt install -y python3-pip
             pip3 install https://s3.amazonaws.com/cloudformation-examples/aws-cfn-bootstrap-py3-latest.tar.gz
+
+          # Create symbolic link for cfn-signal
+          ln -sf /usr/local/bin/cfn-signal /usr/bin/cfn-signal || true
 
             # Clone and setup Migration project
             cd /home/ubuntu
@@ -224,23 +257,52 @@ Resources:
             echo "🎉 Migration environment is ready for use!"
 
           # Signal CloudFormation that setup is complete
-          # Get instance metadata for signaling
-          INSTANCE_ID=$(curl -s http://169.254.169.254/latest/meta-data/instance-id)
-          REGION=$(curl -s http://169.254.169.254/latest/meta-data/placement/region)
+          echo "🔄 Starting CloudFormation signaling process..."
 
-          # Signal success to CloudFormation (if cfn-signal is available)
+          # Get instance metadata for signaling
+          echo "📍 Getting instance metadata..."
+          INSTANCE_ID=$(curl -s http://169.254.169.254/latest/meta-data/instance-id 2>/dev/null || echo "unknown")
+          REGION=$(curl -s http://169.254.169.254/latest/meta-data/placement/region 2>/dev/null || echo "us-east-1")
+
+          echo "📍 Instance ID: $INSTANCE_ID"
+          echo "📍 Region: $REGION"
+
+          # Check if cfn-signal is available
           if command -v cfn-signal >/dev/null 2>&1; then
+              echo "✅ cfn-signal found"
+
+              # Wait a moment for tags to be available
+              sleep 10
+
               # Try to get stack name from tags
+              echo "🔍 Looking for stack name in instance tags..."
               STACK_NAME=$(aws ec2 describe-tags --region $REGION --filters "Name=resource-id,Values=$INSTANCE_ID" "Name=key,Values=aws:cloudformation:stack-name" --query 'Tags[0].Value' --output text 2>/dev/null || echo "unknown")
-              if [ "$STACK_NAME" != "unknown" ] && [ "$STACK_NAME" != "None" ]; then
-                  cfn-signal -e $? --stack $STACK_NAME --resource MigrationInstance --region $REGION
-                  echo "✅ CloudFormation signal sent successfully"
+
+              echo "📍 Stack name: $STACK_NAME"
+
+              if [ "$STACK_NAME" != "unknown" ] && [ "$STACK_NAME" != "None" ] && [ "$STACK_NAME" != "null" ]; then
+                  echo "🚀 Sending CloudFormation signal..."
+                  cfn-signal -e 0 --stack "$STACK_NAME" --resource MigrationInstance --region "$REGION"
+                  SIGNAL_RESULT=$?
+                  if [ $SIGNAL_RESULT -eq 0 ]; then
+                      echo "✅ CloudFormation signal sent successfully!"
+                  else
+                      echo "❌ CloudFormation signal failed with exit code: $SIGNAL_RESULT"
+                  fi
               else
                   echo "⚠️  Could not determine stack name for signaling"
+                  echo "🔍 Available tags:"
+                  aws ec2 describe-tags --region $REGION --filters "Name=resource-id,Values=$INSTANCE_ID" --output table 2>/dev/null || echo "Failed to get tags"
               fi
           else
-              echo "⚠️  cfn-signal not available, skipping CloudFormation signaling"
+              echo "❌ cfn-signal not available"
+              echo "🔍 Checking PATH: $PATH"
+              echo "🔍 Looking for cfn-signal:"
+              find /usr -name "cfn-signal" 2>/dev/null || echo "cfn-signal not found"
           fi
+
+          echo "🎯 Setup completed at $(date)"
+          echo "📝 Check /var/log/cloud-init-output.log for full installation log"
 
 Outputs:
   InstancePublicIP:
