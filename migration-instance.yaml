@@ -158,103 +158,103 @@ Resources:
           #!/bin/bash
           set -e  # Exit on any error
 
-            # Update system
-            apt update -y
-            apt upgrade -y
+          # Update system
+          apt update -y
+          apt upgrade -y
 
-            # Install required packages
-            apt install -y software-properties-common
-            add-apt-repository universe -y
-            apt update -y
-            apt install -y python3 python3-pip python3-venv git curl wget
+          # Install required packages
+          apt install -y software-properties-common
+          add-apt-repository universe -y
+          apt update -y
+          apt install -y python3 python3-pip python3-venv git curl wget
 
-            # Install CloudFormation helper scripts
-            apt install -y python3-pip
-            pip3 install https://s3.amazonaws.com/cloudformation-examples/aws-cfn-bootstrap-py3-latest.tar.gz
+          # Install CloudFormation helper scripts
+          apt install -y python3-pip
+          pip3 install https://s3.amazonaws.com/cloudformation-examples/aws-cfn-bootstrap-py3-latest.tar.gz
 
           # Create symbolic link for cfn-signal
           ln -sf /usr/local/bin/cfn-signal /usr/bin/cfn-signal || true
 
-            # Clone and setup Migration project
-            cd /home/ubuntu
-            git clone https://github.com/AdarBahar/Migration.git
-            cd Migration
+          # Clone and setup Migration project
+          cd /home/ubuntu
+          git clone https://github.com/AdarBahar/Migration.git
+          cd Migration
 
-            # Setup Python environment
-            python3 -m venv venv
-            source venv/bin/activate
-            pip install -r requirements.txt
+          # Setup Python environment
+          python3 -m venv venv
+          source venv/bin/activate
+          pip install -r requirements.txt
 
-            # Install AWS CLI for easier AWS management
-            curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-            unzip awscliv2.zip
-            ./aws/install
-            rm -rf aws awscliv2.zip
+          # Install AWS CLI for easier AWS management
+          curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+          unzip awscliv2.zip
+          ./aws/install
+          rm -rf aws awscliv2.zip
 
-            # Set proper ownership
-            chown -R ubuntu:ubuntu /home/ubuntu/Migration
+          # Set proper ownership
+          chown -R ubuntu:ubuntu /home/ubuntu/Migration
 
-            # Create a startup script for convenience
-            cat > /home/ubuntu/start-migration.sh << 'EOF'
-            #!/bin/bash
-            cd /home/ubuntu/Migration
-            echo "🚀 Migration environment ready!"
-            echo "Available scripts:"
-            echo "  • DB_compare.py - Compare Redis databases"
-            echo "  • ReadWriteOps.py - Performance testing"
-            echo "  • flushDBData.py - Database cleanup"
-            echo "  • manage_env.py - Environment configuration"
-            echo "  • DataFaker.py - Generate test data"
-            echo "  • provision_elasticache.py - Create ElastiCache instances"
-            echo "  • cleanup_elasticache.py - Remove ElastiCache resources"
-            echo ""
-            echo "💡 To activate the virtual environment, run:"
-            echo "   source activate-migration"
-            echo ""
-            echo "🔄 Or manually:"
-            echo "   cd /home/ubuntu/Migration && source venv/bin/activate"
-            EOF
-            chmod +x /home/ubuntu/start-migration.sh
-            chown ubuntu:ubuntu /home/ubuntu/start-migration.sh
+          # Create a startup script for convenience
+          cat > /home/ubuntu/start-migration.sh << 'EOF'
+          #!/bin/bash
+          cd /home/ubuntu/Migration
+          echo "🚀 Migration environment ready!"
+          echo "Available scripts:"
+          echo "  • DB_compare.py - Compare Redis databases"
+          echo "  • ReadWriteOps.py - Performance testing"
+          echo "  • flushDBData.py - Database cleanup"
+          echo "  • manage_env.py - Environment configuration"
+          echo "  • DataFaker.py - Generate test data"
+          echo "  • provision_elasticache.py - Create ElastiCache instances"
+          echo "  • cleanup_elasticache.py - Remove ElastiCache resources"
+          echo ""
+          echo "💡 To activate the virtual environment, run:"
+          echo "   source activate-migration"
+          echo ""
+          echo "🔄 Or manually:"
+          echo "   cd /home/ubuntu/Migration && source venv/bin/activate"
+          EOF
+          chmod +x /home/ubuntu/start-migration.sh
+          chown ubuntu:ubuntu /home/ubuntu/start-migration.sh
 
-            # Create a proper activation script (not just an alias)
-            cat > /home/ubuntu/activate-migration << 'EOF'
-            #!/bin/bash
-            # This script should be sourced, not executed
-            if [[ "$${BASH_SOURCE[0]}" == "$${0}" ]]; then
-                echo "⚠️  This script should be sourced, not executed directly."
-                echo "💡 Run: source activate-migration"
-                exit 1
-            fi
+          # Create a proper activation script (not just an alias)
+          cat > /home/ubuntu/activate-migration << 'EOF'
+          #!/bin/bash
+          # This script should be sourced, not executed
+          if [[ "$${BASH_SOURCE[0]}" == "$${0}" ]]; then
+              echo "⚠️  This script should be sourced, not executed directly."
+              echo "💡 Run: source activate-migration"
+              exit 1
+          fi
 
-            cd /home/ubuntu/Migration
-            source venv/bin/activate
-            echo "✅ Virtual environment activated!"
-            echo "📍 Current directory: $$(pwd)"
-            echo "🐍 Python: $$(which python)"
-            EOF
-            chmod +x /home/ubuntu/activate-migration
-            chown ubuntu:ubuntu /home/ubuntu/activate-migration
+          cd /home/ubuntu/Migration
+          source venv/bin/activate
+          echo "✅ Virtual environment activated!"
+          echo "📍 Current directory: $$(pwd)"
+          echo "🐍 Python: $$(which python)"
+          EOF
+          chmod +x /home/ubuntu/activate-migration
+          chown ubuntu:ubuntu /home/ubuntu/activate-migration
 
-            # Add the activation script to PATH and create alias
-            echo 'export PATH="/home/ubuntu:$$PATH"' >> /home/ubuntu/.bashrc
-            echo 'alias activate-migration="source /home/ubuntu/activate-migration"' >> /home/ubuntu/.bashrc
+          # Add the activation script to PATH and create alias
+          echo 'export PATH="/home/ubuntu:$$PATH"' >> /home/ubuntu/.bashrc
+          echo 'alias activate-migration="source /home/ubuntu/activate-migration"' >> /home/ubuntu/.bashrc
 
-            # Also create a direct activation command
-            cat > /home/ubuntu/migration << 'EOF'
-            #!/bin/bash
-            cd /home/ubuntu/Migration
-            source venv/bin/activate
-            exec bash --rcfile <(echo "PS1='(migration) \\u@\\h:\\w\\$$ '")
-            EOF
-            chmod +x /home/ubuntu/migration
-            chown ubuntu:ubuntu /home/ubuntu/migration
+          # Also create a direct activation command
+          cat > /home/ubuntu/migration << 'EOF'
+          #!/bin/bash
+          cd /home/ubuntu/Migration
+          source venv/bin/activate
+          exec bash --rcfile <(echo "PS1='(migration) \\u@\\h:\\w\\$$ '")
+          EOF
+          chmod +x /home/ubuntu/migration
+          chown ubuntu:ubuntu /home/ubuntu/migration
 
-            chown ubuntu:ubuntu /home/ubuntu/.bashrc
+          chown ubuntu:ubuntu /home/ubuntu/.bashrc
 
-            # All installation completed successfully!
-            echo "✅ All installation completed successfully!"
-            echo "🎉 Migration environment is ready for use!"
+          # All installation completed successfully!
+          echo "✅ All installation completed successfully!"
+          echo "🎉 Migration environment is ready for use!"
 
           # Signal CloudFormation that setup is complete
           echo "🔄 Starting CloudFormation signaling process..."
