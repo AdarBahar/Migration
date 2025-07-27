@@ -1,6 +1,6 @@
 
 AWSTemplateFormatVersion: '2010-09-09'
-Description: Provision an EC2 instance for the Migration project with Python and Git preconfigured.
+Description: Provision an EC2 instance for the Migration project with Python and Git pre-configured.
 
 Metadata:
   AWS::CloudFormation::Interface:
