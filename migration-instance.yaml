@@ -104,6 +104,10 @@ Resources:
 
   MigrationInstance:
     Type: AWS::EC2::Instance
+    CreationPolicy:
+      ResourceSignal:
+        Count: 1
+        Timeout: PT15M
     Properties:
       InstanceType: !Ref InstanceType
       KeyName: !Ref KeyName
@@ -120,8 +124,20 @@ Resources:
         - Key: Environment
           Value: Development
       UserData:
-        Fn::Base64: |
+        Fn::Base64: !Sub |
           #!/bin/bash
+          set -e  # Exit on any error
+
+          # Function to signal CloudFormation on exit
+          function signal_cloudformation() {
+              local exit_code=$?
+              echo "Signaling CloudFormation with exit code: $exit_code"
+              cfn-signal -e $exit_code --stack ${AWS::StackName} --resource MigrationInstance --region ${AWS::Region}
+          }
+
+          # Set trap to signal CloudFormation on script exit
+          trap signal_cloudformation EXIT
+
           # Update system
           apt update -y
           apt upgrade -y
@@ -131,6 +147,10 @@ Resources:
           add-apt-repository universe -y
           apt update -y
           apt install -y python3 python3-pip python3-venv git curl wget
+
+          # Install CloudFormation helper scripts
+          apt install -y python3-pip
+          pip3 install https://s3.amazonaws.com/cloudformation-examples/aws-cfn-bootstrap-py3-latest.tar.gz
           
           # Clone and setup Migration project
           cd /home/ubuntu
@@ -208,6 +228,10 @@ Resources:
           chown ubuntu:ubuntu /home/ubuntu/migration
 
           chown ubuntu:ubuntu /home/ubuntu/.bashrc
+
+          # All installation completed successfully!
+          echo "✅ All installation completed successfully!"
+          echo "🎉 Migration environment is ready for use!"
 
 Outputs:
   InstancePublicIP:
