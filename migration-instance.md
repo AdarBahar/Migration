@@ -175,13 +175,15 @@ Here’s what each script does in the `Migration` project:
 - ✅ **Uses default AMI**: `ami-042b4708b1d05f512` (Ubuntu 22.04 LTS in us-east-1)
 - ✅ **Default stack name**: `Redis-Migration-Tool`
 - ✅ **Updates system packages** (`apt update && upgrade`)
-- ✅ **Installs all dependencies**: Python 3, pip, venv, Git, curl, wget
+- ✅ **Installs all dependencies**: Python 3, pip, venv, Git, curl, wget, AWS CLI
+- ✅ **Installs CloudFormation helpers** for proper signaling
 - ✅ **Clones this repository** from GitHub
 - ✅ **Creates virtual environment** and installs requirements
 - ✅ **Sets up security group** for SSH access from your IP only
 - ✅ **Creates convenience scripts** for easy environment activation
 - ✅ **Sets proper file ownership** for ubuntu user
 - ✅ **Ensures public IP assignment** (requires public subnet with auto-assign enabled)
+- ✅ **Waits for completion**: Shows CREATE_COMPLETE only after all software is installed
 
 ### CloudFormation Parameters:
 
@@ -218,9 +220,13 @@ Here’s what each script does in the `Migration` project:
 
 5. **Key Pair**: AWS Console → EC2 → Key Pairs → Create or select existing → Note the name (not the file path)
 
+### ⏱️ Deployment Timing:
+
+**Important**: The CloudFormation stack will show `CREATE_IN_PROGRESS` for 10-15 minutes while all software is being installed. The stack will only show `CREATE_COMPLETE` when everything is fully configured and ready to use.
+
 ### 🎯 After CloudFormation Deployment:
 
-Once your stack is deployed successfully:
+Once your stack shows `CREATE_COMPLETE` (meaning all installation is finished):
 
 1. **Get the public IP** from the CloudFormation Outputs tab
 2. **SSH to your instance**:
