@@ -65,6 +65,8 @@ pip install -r requirements.txt
     
 - 📊 Generate fake data for testing using `datafaker`
 
+- 🚀 Provision AWS ElastiCache Redis instances automatically
+
 ---
 
 ## 📦 Project Objectives
@@ -90,6 +92,9 @@ pip install -r requirements.txt
 |`flushDBData.py`|Interactively flush one or both databases|
 |`manage_env.py`|CLI tool to manage Redis connection strings and friendly names in a `.env` file|
 |`datafaker.py`|Generate fake data for Redis testing|
+|`provision_elasticache.py`|🆕 Provision AWS ElastiCache Redis instances with proper configuration|
+|`cleanup_elasticache.py`|🆕 Clean up ElastiCache resources and associated AWS components|
+|`elasticache_config.py`|🆕 Configuration options and interactive builder for ElastiCache|
 |`.env`|Environment file used by all scripts for Redis configuration (auto-generated/edited)|
 
 ---
@@ -231,6 +236,64 @@ Options:
 - `--pattern`: Key pattern (e.g., `user:{id}`)
 - `--value-size`: Size of values in bytes (default: 256)
 - `--data-type`: Type of data to generate (e.g., string, hash, list)
+
+---
+
+### `provision_elasticache.py` 🆕
+
+🚀 **Automatically provision AWS ElastiCache Redis instances**
+
+- Creates ElastiCache Redis clusters with proper network configuration
+
+- Automatically configures security groups and subnet groups
+
+- Interactive configuration builder with cost estimation
+
+- Environment-specific presets (development, staging, production)
+
+- Generates .env configuration for immediate use
+
+Run it:
+
+```bash
+# Interactive mode (recommended)
+python provision_elasticache.py
+
+# Automatic mode with defaults
+python provision_elasticache.py --auto
+
+# Custom configuration
+python provision_elasticache.py --auto --node-type cache.t3.small --engine-version 7.0
+```
+
+📖 **[Complete ElastiCache Guide](ELASTICACHE_README.md)** - Detailed documentation and troubleshooting
+
+---
+
+### `cleanup_elasticache.py` 🆕
+
+🧹 **Clean up ElastiCache resources and AWS components**
+
+- List all ElastiCache clusters
+
+- Delete specific clusters or all migration tool resources
+
+- Clean up associated security groups and subnet groups
+
+- Batch cleanup operations
+
+Run it:
+
+```bash
+# List all clusters
+python cleanup_elasticache.py --list
+
+# Delete specific cluster
+python cleanup_elasticache.py --delete cluster-id
+
+# Clean up all migration tool resources
+python cleanup_elasticache.py --cleanup-all
+```
 
 ---
 
