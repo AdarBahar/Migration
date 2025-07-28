@@ -11,18 +11,41 @@ def reload_env():
     """Reload updated .env values into the environment."""
     load_dotenv(ENV_PATH, override=True)
 
-def prompt_env(key, label, secret=False, default=None, max_length=None):
+def prompt_env(key, label, secret=False, default=None, max_length=None, allow_empty=False):
     """Prompt user for a value and set it in the .env file."""
     current = os.getenv(key, default or "")
-    prompt = f"{label} [{current}]: "
+
+    # For passwords, show a more helpful prompt
+    if secret and current and current not in ["", "your-source-password", "your-destination-password"]:
+        prompt = f"{label} [***hidden***] (press Enter to keep current, or type new): "
+    elif secret:
+        prompt = f"{label} (press Enter for no password): "
+    else:
+        prompt = f"{label} [{current}]: "
+
     while True:
         new_value = getpass(prompt) if secret else input(prompt).strip()
+
+        # Handle empty input
         if not new_value:
-            new_value = current
+            if secret and allow_empty:
+                # For passwords, empty input means no password
+                new_value = ""
+            elif secret and current not in ["", "your-source-password", "your-destination-password"]:
+                # Keep existing password if it's not a placeholder
+                new_value = current
+            elif not secret:
+                # For non-secrets, keep current value if not empty
+                new_value = current if current else ""
+            else:
+                # For passwords with placeholder values, set to empty
+                new_value = ""
+
         if max_length and len(new_value) > max_length:
             print(f"⚠️ Value too long. Max {max_length} characters allowed.")
             continue
         break
+
     set_key(ENV_PATH, key, new_value)
     reload_env()
 
@@ -32,7 +55,7 @@ def setup_connection(label_prefix):
     prompt_env(f"{label_prefix.upper()}_NAME", "Name (friendly label)", max_length=50)
     prompt_env(f"{label_prefix.upper()}_HOST", "Host")
     prompt_env(f"{label_prefix.upper()}_PORT", "Port")
-    prompt_env(f"{label_prefix.upper()}_PASSWORD", "Password (hidden)", secret=True)
+    prompt_env(f"{label_prefix.upper()}_PASSWORD", "Password (hidden)", secret=True, allow_empty=True)
     tls = input("Use TLS/SSL? (y/n): ").strip().lower()
     tls_value = "true" if tls == "y" else "false"
     set_key(ENV_PATH, f"{label_prefix.upper()}_TLS", tls_value)
