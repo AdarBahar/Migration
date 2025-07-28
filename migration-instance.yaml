@@ -133,10 +133,11 @@ Resources:
 
   MigrationInstance:
     Type: AWS::EC2::Instance
-    CreationPolicy:
-      ResourceSignal:
-        Count: 1
-        Timeout: PT15M
+    # Temporarily disabled for testing - will re-enable once installation is verified
+    # CreationPolicy:
+    #   ResourceSignal:
+    #     Count: 1
+    #     Timeout: PT15M
     Properties:
       InstanceType: !Ref InstanceType
       KeyName: !Ref KeyName
@@ -156,17 +157,40 @@ Resources:
       UserData:
         Fn::Base64: |
           #!/bin/bash
-          set -e  # Exit on any error
+          # Detailed logging for troubleshooting
+          exec > >(tee /var/log/user-data.log) 2>&1
+          echo "🚀 Starting UserData script at $(date)"
+
+          # Don't exit on error initially - let's see what fails
+          set +e
 
           # Update system
+          echo "📦 Updating system packages..."
           apt update -y
+          if [ $? -eq 0 ]; then
+              echo "✅ System update successful"
+          else
+              echo "❌ System update failed"
+          fi
+
           apt upgrade -y
+          if [ $? -eq 0 ]; then
+              echo "✅ System upgrade successful"
+          else
+              echo "❌ System upgrade failed"
+          fi
 
           # Install required packages
+          echo "📦 Installing required packages..."
           apt install -y software-properties-common
           add-apt-repository universe -y
           apt update -y
           apt install -y python3 python3-pip python3-venv git curl wget
+          if [ $? -eq 0 ]; then
+              echo "✅ Package installation successful"
+          else
+              echo "❌ Package installation failed"
+          fi
 
           # Install CloudFormation helper scripts
           apt install -y python3-pip
@@ -176,14 +200,49 @@ Resources:
           ln -sf /usr/local/bin/cfn-signal /usr/bin/cfn-signal || true
 
           # Clone and setup Migration project
+          echo "📁 Cloning Migration repository..."
           cd /home/ubuntu
           git clone https://github.com/AdarBahar/Migration.git
+          if [ $? -eq 0 ]; then
+              echo "✅ Repository cloned successfully"
+          else
+              echo "❌ Repository clone failed"
+              exit 1
+          fi
+
           cd Migration
+          if [ $? -eq 0 ]; then
+              echo "✅ Changed to Migration directory"
+          else
+              echo "❌ Failed to change to Migration directory"
+              exit 1
+          fi
 
           # Setup Python environment
+          echo "🐍 Setting up Python virtual environment..."
           python3 -m venv venv
+          if [ $? -eq 0 ]; then
+              echo "✅ Virtual environment created"
+          else
+              echo "❌ Virtual environment creation failed"
+              exit 1
+          fi
+
           source venv/bin/activate
+          if [ $? -eq 0 ]; then
+              echo "✅ Virtual environment activated"
+          else
+              echo "❌ Virtual environment activation failed"
+              exit 1
+          fi
+
           pip install -r requirements.txt
+          if [ $? -eq 0 ]; then
+              echo "✅ Python requirements installed"
+          else
+              echo "❌ Python requirements installation failed"
+              exit 1
+          fi
 
           # Install AWS CLI for easier AWS management
           curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
