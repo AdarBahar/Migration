@@ -103,6 +103,9 @@ Resources:
             Action: sts:AssumeRole
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
+        - arn:aws:iam::aws:policy/AmazonEC2ReadOnlyAccess
+        - arn:aws:iam::aws:policy/AmazonElastiCacheFullAccess
+        - arn:aws:iam::aws:policy/AmazonVPCReadOnlyAccess
       Policies:
         - PolicyName: CloudFormationSignaling
           PolicyDocument:
