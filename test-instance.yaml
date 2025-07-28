@@ -1,0 +1,153 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Minimal test template for debugging UserData issues'
+
+Parameters:
+  KeyName:
+    Type: AWS::EC2::KeyPair::KeyName
+    Description: EC2 Key Pair for SSH access
+    
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC ID where the instance will be launched
+    
+  SubnetId:
+    Type: AWS::EC2::Subnet::Id
+    Description: Subnet ID (must be public with auto-assign public IP)
+    
+  MyIP:
+    Type: String
+    Description: Your IP address for SSH access (get from https://checkip.amazonaws.com)
+    Default: 0.0.0.0/0
+
+Resources:
+  TestSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow SSH for testing
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: !Ref MyIP
+
+  TestInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: t3.micro
+      KeyName: !Ref KeyName
+      ImageId: ami-042b4708b1d05f512  # Ubuntu 22.04 LTS in us-east-1
+      SubnetId: !Ref SubnetId
+      SecurityGroupIds:
+        - !Ref TestSecurityGroup
+      Tags:
+        - Key: Name
+          Value: Migration-Test-Instance
+      UserData:
+        Fn::Base64: |
+          #!/bin/bash
+          # Simple test script with detailed logging
+          exec > >(tee /var/log/test-user-data.log) 2>&1
+          echo "🚀 Test UserData script started at $(date)"
+          
+          # Test basic commands
+          echo "📋 System Information:"
+          echo "  OS: $(lsb_release -d | cut -f2)"
+          echo "  User: $(whoami)"
+          echo "  Home: $HOME"
+          echo "  Working directory: $(pwd)"
+          
+          # Test network connectivity
+          echo "🌐 Testing network connectivity..."
+          if ping -c 1 8.8.8.8 >/dev/null 2>&1; then
+              echo "✅ Internet connectivity: OK"
+          else
+              echo "❌ Internet connectivity: FAILED"
+          fi
+          
+          if ping -c 1 github.com >/dev/null 2>&1; then
+              echo "✅ GitHub connectivity: OK"
+          else
+              echo "❌ GitHub connectivity: FAILED"
+          fi
+          
+          # Test package installation
+          echo "📦 Testing package installation..."
+          apt update -y
+          if [ $? -eq 0 ]; then
+              echo "✅ apt update: OK"
+          else
+              echo "❌ apt update: FAILED"
+          fi
+          
+          apt install -y git python3 python3-pip python3-venv curl wget
+          if [ $? -eq 0 ]; then
+              echo "✅ Package installation: OK"
+          else
+              echo "❌ Package installation: FAILED"
+          fi
+          
+          # Test git clone
+          echo "📁 Testing git clone..."
+          cd /home/ubuntu
+          git clone https://github.com/AdarBahar/Migration.git
+          if [ $? -eq 0 ]; then
+              echo "✅ Git clone: OK"
+              echo "📁 Repository contents:"
+              ls -la Migration/ | head -10
+          else
+              echo "❌ Git clone: FAILED"
+          fi
+          
+          # Test Python environment
+          echo "🐍 Testing Python environment..."
+          cd Migration
+          python3 -m venv test-venv
+          if [ $? -eq 0 ]; then
+              echo "✅ Virtual environment creation: OK"
+          else
+              echo "❌ Virtual environment creation: FAILED"
+          fi
+          
+          source test-venv/bin/activate
+          if [ $? -eq 0 ]; then
+              echo "✅ Virtual environment activation: OK"
+              echo "🐍 Python version: $(python --version)"
+              echo "🐍 Pip version: $(pip --version)"
+          else
+              echo "❌ Virtual environment activation: FAILED"
+          fi
+          
+          # Test requirements installation
+          if [ -f requirements.txt ]; then
+              echo "📦 Testing requirements installation..."
+              pip install -r requirements.txt
+              if [ $? -eq 0 ]; then
+                  echo "✅ Requirements installation: OK"
+              else
+                  echo "❌ Requirements installation: FAILED"
+              fi
+          else
+              echo "⚠️  requirements.txt not found"
+          fi
+          
+          # Set proper ownership
+          chown -R ubuntu:ubuntu /home/ubuntu/Migration
+          
+          # Final status
+          echo "🎯 Test completed at $(date)"
+          echo "📝 Check /var/log/test-user-data.log for full details"
+          echo "✅ Test UserData script finished successfully!"
+
+Outputs:
+  InstancePublicIP:
+    Description: Public IP of the test instance
+    Value: !GetAtt TestInstance.PublicIp
+    
+  SSHCommand:
+    Description: SSH command to connect to test instance
+    Value: !Sub "ssh -i /path/to/${KeyName}.pem ubuntu@${TestInstance.PublicIp}"
+    
+  LogCommand:
+    Description: Command to check the test log
+    Value: "sudo cat /var/log/test-user-data.log"
