@@ -399,12 +399,15 @@ class ElastiCacheProvisioner:
             )
 
             print(f"✅ ElastiCache Serverless cache creation initiated: {cache_name}")
-            return cache_name
+            return {'name': cache_name, 'type': 'serverless'}
 
         except Exception as e:
             print(f"❌ Failed to create ElastiCache Serverless cache: {e}")
             print(f"💡 Falling back to traditional cluster...")
-            return self.create_elasticache_cluster_fallback(cache_name, security_group_id, subnet_group_name)
+            result = self.create_elasticache_cluster_fallback(cache_name, security_group_id, subnet_group_name)
+            if result:
+                return {'name': result, 'type': 'cluster'}
+            return None
 
     def create_elasticache_cluster_fallback(self, cluster_id, security_group_id, subnet_group_name,
                                           node_type='cache.t3.micro', engine_version='7.0'):
@@ -652,44 +655,48 @@ class ElastiCacheProvisioner:
         print(f"\n📋 Creating ElastiCache...")
 
         # Try serverless first, fallback to cluster if needed
-        created_cache = self.create_elasticache_serverless(
+        created_cache_result = self.create_elasticache_serverless(
             cache_name,
             security_group_id,
             subnet_group_name
         )
 
-        if not created_cache:
+        if not created_cache_result:
             return False
 
-        # Determine if it's serverless or cluster
-        is_serverless = created_cache == cache_name
+        # Extract cache name and type
+        created_cache_name = created_cache_result['name']
+        cache_type = created_cache_result['type']
+        is_serverless = cache_type == 'serverless'
+
+        print(f"📋 Created cache: {created_cache_name} (Type: {cache_type})")
 
         # Step 6: Wait for cache to be available
         print(f"\n📋 Waiting for cache to become available...")
-        cache_info = self.wait_for_cache_available(created_cache, is_serverless)
+        cache_info = self.wait_for_cache_available(created_cache_name, is_serverless)
         if not cache_info:
             print("❌ Cache did not become available within timeout period")
             return False
 
         # Step 7: Generate configuration
         print(f"\n📋 Generating configuration...")
-        env_config = self.generate_env_config(cache_info, created_cache)
+        env_config = self.generate_env_config(cache_info, created_cache_name)
 
         # Save to file
-        env_filename = f"elasticache_{created_cache.replace('-', '_')}.env"
+        env_filename = f"elasticache_{created_cache_name.replace('-', '_')}.env"
         with open(env_filename, 'w') as f:
             f.write(env_config)
 
         # Save cache info
-        info_filename = self.save_cache_info(created_cache, cache_info, security_group_id, subnet_group_name)
+        info_filename = self.save_cache_info(created_cache_name, cache_info, security_group_id, subnet_group_name)
 
         # Step 8: Display success information
-        cache_type = "Serverless Cache" if cache_info.get('type') == 'serverless' else "Redis Cluster"
+        cache_type_display = "Serverless Cache" if cache_info.get('type') == 'serverless' else "Redis Cluster"
         print("\n" + "=" * 60)
-        print(f"🎉 ElastiCache {cache_type} provisioned successfully!")
+        print(f"🎉 ElastiCache {cache_type_display} provisioned successfully!")
         print("=" * 60)
-        print(f"📍 Cache Name: {created_cache}")
-        print(f"📍 Type: Redis OSS {cache_type}")
+        print(f"📍 Cache Name: {created_cache_name}")
+        print(f"📍 Type: Redis OSS {cache_type_display}")
         print(f"📍 Endpoint: {cache_info['endpoint']}:{cache_info['port']}")
         print(f"📍 Security Group: {security_group_id}")
         print(f"📍 Subnet Group: {subnet_group_name}")
