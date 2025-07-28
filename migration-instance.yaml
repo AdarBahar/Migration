@@ -299,6 +299,21 @@ Resources:
           echo 'export PATH="/home/ubuntu:$$PATH"' >> /home/ubuntu/.bashrc
           echo 'alias activate-migration="source /home/ubuntu/activate-migration"' >> /home/ubuntu/.bashrc
 
+          # Ensure basic commands are available (fix PATH issues)
+          echo 'export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$$PATH"' >> /home/ubuntu/.bashrc
+
+          # Create a simple test to verify ls command
+          echo "🔍 Testing basic commands..."
+          if command -v ls >/dev/null 2>&1; then
+              echo "✅ ls command available"
+              ls -la /home/ubuntu/ | head -5
+          else
+              echo "❌ ls command not found in PATH"
+              echo "📍 Current PATH: $PATH"
+              echo "📍 Available commands in /bin:"
+              find /bin -name "ls*" 2>/dev/null || echo "No ls found in /bin"
+          fi
+
           # Also create a direct activation command
           cat > /home/ubuntu/migration << 'EOF'
           #!/bin/bash

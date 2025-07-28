@@ -111,40 +111,123 @@ class ElastiCacheProvisioner:
             # Try to get instance metadata (only works on EC2)
             import urllib.request
             import urllib.error
-            
+
             # Get instance ID
             try:
-                instance_id = urllib.request.urlopen(
+                print("🔍 Attempting to get EC2 metadata...")
+
+                # Try with longer timeout and better error handling
+                request = urllib.request.Request(
                     'http://169.254.169.254/latest/meta-data/instance-id',
-                    timeout=2
-                ).read().decode()
-                
+                    headers={'User-Agent': 'ElastiCache-Provisioner/1.0'}
+                )
+
+                with urllib.request.urlopen(request, timeout=5) as response:
+                    instance_id = response.read().decode().strip()
+
+                if not instance_id:
+                    print("⚠️  Empty instance ID from metadata service")
+                    return None
+
+                print(f"✅ Instance ID from metadata: {instance_id}")
+
                 # Get VPC ID and subnet ID from instance
+                print("🔍 Getting instance details from EC2 API...")
                 response = self.ec2_client.describe_instances(InstanceIds=[instance_id])
                 instance = response['Reservations'][0]['Instances'][0]
-                
+
                 vpc_id = instance['VpcId']
                 subnet_id = instance['SubnetId']
                 security_groups = [sg['GroupId'] for sg in instance['SecurityGroups']]
-                
+
                 print(f"✅ Current EC2 instance detected: {instance_id}")
                 print(f"📍 VPC: {vpc_id}")
                 print(f"📍 Subnet: {subnet_id}")
                 print(f"📍 Security Groups: {security_groups}")
-                
+
                 return {
                     'instance_id': instance_id,
                     'vpc_id': vpc_id,
                     'subnet_id': subnet_id,
                     'security_groups': security_groups
                 }
-                
-            except (urllib.error.URLError, urllib.error.HTTPError):
+
+            except (urllib.error.URLError, urllib.error.HTTPError) as e:
+                print(f"⚠️  Metadata service error: {e}")
                 print("⚠️  Not running on EC2 or metadata service unavailable")
                 return None
-                
+            except ClientError as e:
+                print(f"⚠️  AWS API error: {e}")
+                return None
+
         except Exception as e:
             print(f"⚠️  Could not get EC2 instance info: {e}")
+            return None
+
+    def get_manual_vpc_config(self):
+        """Get VPC configuration manually from user input."""
+        try:
+            print("\n🔧 Manual VPC Configuration")
+            print("=" * 40)
+
+            # List available VPCs
+            print("📋 Available VPCs in region {}:".format(self.region))
+            try:
+                vpcs = self.ec2_client.describe_vpcs()['Vpcs']
+                for i, vpc in enumerate(vpcs, 1):
+                    vpc_name = "Unknown"
+                    for tag in vpc.get('Tags', []):
+                        if tag['Key'] == 'Name':
+                            vpc_name = tag['Value']
+                            break
+
+                    print(f"  {i}. {vpc['VpcId']} - {vpc_name} ({vpc['CidrBlock']})")
+
+                if not vpcs:
+                    print("  No VPCs found in this region.")
+                    return None
+
+            except Exception as e:
+                print(f"  Could not list VPCs: {e}")
+                return None
+
+            # Get VPC ID
+            print("\n🔍 Enter VPC ID (or press Enter to use default VPC): ", end="")
+            vpc_id = input().strip()
+
+            if not vpc_id:
+                # Try to find default VPC
+                try:
+                    default_vpcs = [vpc for vpc in vpcs if vpc.get('IsDefault', False)]
+                    if default_vpcs:
+                        vpc_id = default_vpcs[0]['VpcId']
+                        print(f"✅ Using default VPC: {vpc_id}")
+                    else:
+                        print("❌ No default VPC found. Please specify a VPC ID.")
+                        return None
+                except:
+                    print("❌ Could not determine default VPC.")
+                    return None
+
+            # Validate VPC exists
+            try:
+                self.ec2_client.describe_vpcs(VpcIds=[vpc_id])
+                print(f"✅ VPC {vpc_id} found")
+            except:
+                print(f"❌ VPC {vpc_id} not found or not accessible")
+                return None
+
+            # For manual config, we'll use a placeholder instance ID and empty security groups
+            # The script will create its own security group
+            return {
+                'instance_id': 'manual-config',
+                'vpc_id': vpc_id,
+                'subnet_id': None,  # Will be determined from VPC subnets
+                'security_groups': []  # Will create new security group
+            }
+
+        except Exception as e:
+            print(f"❌ Manual configuration failed: {e}")
             return None
 
     def get_vpc_subnets(self, vpc_id):
@@ -488,9 +571,25 @@ class ElastiCacheProvisioner:
         instance_info = self.get_current_instance_info()
 
         if not instance_info:
-            print("❌ Could not determine EC2 instance information.")
-            print("💡 Please ensure you're running this on an EC2 instance or provide VPC details manually.")
-            return False
+            print("❌ Could not determine EC2 instance information automatically.")
+            print("💡 This might happen if:")
+            print("   • Not running on an EC2 instance")
+            print("   • EC2 metadata service is disabled")
+            print("   • Network connectivity issues")
+            print("")
+
+            # Offer manual configuration
+            print("🔧 Would you like to configure VPC details manually? (y/N): ", end="")
+            manual_config = input().strip().lower()
+
+            if manual_config in ['y', 'yes']:
+                instance_info = self.get_manual_vpc_config()
+                if not instance_info:
+                    print("❌ Manual configuration failed.")
+                    return False
+            else:
+                print("❌ Cannot proceed without VPC information.")
+                return False
 
         vpc_id = instance_info['vpc_id']
         source_security_groups = instance_info['security_groups']
