@@ -8,6 +8,20 @@ A collection of Python tools to manage, test, and verify synchronization between
 
 ---
 
+## 📖 **NEW: Complete Walkthrough Guide**
+
+🎯 **[WALKTHROUGH.md](WALKTHROUGH.md)** - **Complete step-by-step guide** from deployment to migration testing!
+
+This comprehensive guide covers:
+- ✅ CloudFormation deployment with exact commands
+- ✅ Instance verification and connection
+- ✅ ElastiCache provisioning (out-of-the-box)
+- ✅ Environment configuration and testing
+- ✅ Data generation and performance benchmarking
+- ✅ Troubleshooting and best practices
+
+---
+
 ## 🚀 Quick AWS Setup with CloudFormation
 
 Want to quickly set up an AWS EC2 instance with everything pre-configured? Use our CloudFormation template:
@@ -29,7 +43,29 @@ Want to quickly set up an AWS EC2 instance with everything pre-configured? Use o
 ### 🎯 After Deployment:
 1. **SSH to your instance**: `ssh -i /path/to/your-key.pem ubuntu@<public-ip>`
 2. **Activate environment**: `cd Migration && source venv/bin/activate`
-3. **Start using tools**: `python manage_env.py` to configure Redis connections
+3. **Follow the walkthrough**: See [WALKTHROUGH.md](WALKTHROUGH.md) for complete step-by-step instructions
+4. **Start using tools**: `python manage_env.py`
+
+### ⚡ Quick Start Commands:
+```bash
+# After SSH to instance
+cd /home/ubuntu/Migration && source venv/bin/activate
+
+# 1. Provision ElastiCache (auto-detects region and VPC)
+python provision_elasticache.py
+
+# 2. Configure connections
+python manage_env.py
+
+# 3. Generate test data
+python DataFaker.py
+
+# 4. Compare databases
+python DB_compare.py
+
+# 5. Run performance tests
+python ReadWriteOps.py
+``` to configure Redis connections
 
 ### 💡 Quick Environment Activation:
 ```bash
