@@ -136,11 +136,10 @@ Resources:
 
   MigrationInstance:
     Type: AWS::EC2::Instance
-    # Temporarily disabled for testing - will re-enable once installation is verified
-    # CreationPolicy:
-    #   ResourceSignal:
-    #     Count: 1
-    #     Timeout: PT15M
+    CreationPolicy:
+      ResourceSignal:
+        Count: 1
+        Timeout: PT20M
     Properties:
       InstanceType: !Ref InstanceType
       KeyName: !Ref KeyName
@@ -248,9 +247,33 @@ Resources:
           fi
 
           # Install AWS CLI for easier AWS management
+          echo "📦 Installing AWS CLI..."
+          apt install -y unzip
+          if [ $? -eq 0 ]; then
+              echo "✅ unzip installed successfully"
+          else
+              echo "❌ unzip installation failed"
+              exit 1
+          fi
+
           curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+          if [ $? -eq 0 ]; then
+              echo "✅ AWS CLI downloaded successfully"
+          else
+              echo "❌ AWS CLI download failed"
+              exit 1
+          fi
+
           unzip awscliv2.zip
-          ./aws/install
+          sudo aws/install
+          if [ $? -eq 0 ]; then
+              echo "✅ AWS CLI installed successfully"
+              aws --version
+          else
+              echo "❌ AWS CLI installation failed"
+              exit 1
+          fi
+
           rm -rf aws awscliv2.zip
 
           # Set proper ownership
@@ -329,6 +352,110 @@ Resources:
 
           chown ubuntu:ubuntu /home/ubuntu/.bashrc
 
+          # Create comprehensive setup verification script
+          cat > /home/ubuntu/Migration/verify_setup.sh << 'EOF'
+          #!/bin/bash
+          echo "🔍 Migration Environment Verification"
+          echo "===================================="
+
+          # Test region detection
+          echo "🌍 Testing region detection..."
+          if [ -f ".region" ]; then
+              REGION=$(cat .region)
+              echo "✅ Region detected: $REGION"
+          else
+              echo "❌ Region file not found"
+          fi
+
+          # Test virtual environment
+          echo "🐍 Testing virtual environment..."
+          if [ -d "venv" ]; then
+              source venv/bin/activate
+              echo "✅ Virtual environment activated"
+              echo "   Python: $(python --version)"
+              echo "   Pip: $(pip --version)"
+          else
+              echo "❌ Virtual environment not found"
+          fi
+
+          # Test AWS CLI
+          echo "🔧 Testing AWS CLI..."
+          if command -v aws >/dev/null 2>&1; then
+              echo "✅ AWS CLI available: $(aws --version)"
+          else
+              echo "❌ AWS CLI not found"
+          fi
+
+          # Test ElastiCache script
+          echo "🚀 Testing ElastiCache provisioner..."
+          python3 -c "
+          try:
+              from provision_elasticache import ElastiCacheProvisioner
+              provisioner = ElastiCacheProvisioner()
+              print(f'✅ ElastiCache provisioner ready (Region: {provisioner.region})')
+          except Exception as e:
+              print(f'❌ ElastiCache provisioner failed: {e}')
+          "
+
+          echo ""
+          echo "🎯 Setup verification complete!"
+          echo "💡 To provision ElastiCache: python3 provision_elasticache.py"
+          EOF
+
+          chmod +x /home/ubuntu/Migration/verify_setup.sh
+          chown ubuntu:ubuntu /home/ubuntu/Migration/verify_setup.sh
+
+          # Create region detection script with IMDSv2 support
+          echo "🌍 Creating region detection script..."
+          cat > /home/ubuntu/Migration/get_region.py << 'EOF'
+          #!/usr/bin/env python3
+          import urllib.request
+          import os
+
+          def get_region_imdsv2():
+              """Get region using IMDSv2 (with token)."""
+              try:
+                  # Step 1: Get token
+                  token_request = urllib.request.Request(
+                      'http://169.254.169.254/latest/api/token',
+                      headers={'X-aws-ec2-metadata-token-ttl-seconds': '21600'}
+                  )
+                  token_request.get_method = lambda: 'PUT'
+
+                  with urllib.request.urlopen(token_request, timeout=5) as response:
+                      token = response.read().decode().strip()
+
+                  # Step 2: Get region using token
+                  region_request = urllib.request.Request(
+                      'http://169.254.169.254/latest/meta-data/placement/region',
+                      headers={'X-aws-ec2-metadata-token': token}
+                  )
+
+                  with urllib.request.urlopen(region_request, timeout=5) as response:
+                      region = response.read().decode().strip()
+
+                  return region
+
+              except Exception as e:
+                  return None
+
+          if __name__ == "__main__":
+              region = get_region_imdsv2()
+              if region:
+                  with open('.region', 'w') as f:
+                      f.write(region)
+                  print(f"Region detected and saved: {region}")
+              else:
+                  print("Could not detect region")
+          EOF
+
+          chmod +x /home/ubuntu/Migration/get_region.py
+          chown ubuntu:ubuntu /home/ubuntu/Migration/get_region.py
+
+          # Run region detection
+          cd /home/ubuntu/Migration
+          python3 get_region.py
+
           # All installation completed successfully!
           echo "✅ All installation completed successfully!"
           echo "🎉 Migration environment is ready for use!"
@@ -336,10 +463,19 @@ Resources:
           # Signal CloudFormation that setup is complete
           echo "🔄 Starting CloudFormation signaling process..."
 
-          # Get instance metadata for signaling
-          echo "📍 Getting instance metadata..."
-          INSTANCE_ID=$(curl -s http://169.254.169.254/latest/meta-data/instance-id 2>/dev/null || echo "unknown")
-          REGION=$(curl -s http://169.254.169.254/latest/meta-data/placement/region 2>/dev/null || echo "us-east-1")
+          # Get instance metadata for signaling using IMDSv2
+          echo "📍 Getting instance metadata with IMDSv2..."
+          TOKEN=$(curl -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600" 2>/dev/null || echo "")
+
+          if [ -n "$TOKEN" ]; then
+              INSTANCE_ID=$(curl -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/instance-id 2>/dev/null || echo "unknown")
+              REGION=$(curl -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/placement/region 2>/dev/null || echo "us-east-1")
+              echo "✅ IMDSv2 metadata retrieved successfully"
+          else
+              echo "⚠️  IMDSv2 token failed, trying fallback..."
+              INSTANCE_ID="unknown"
+              REGION=$(cat .region 2>/dev/null || echo "us-east-1")
+          fi
 
           echo "📍 Instance ID: $INSTANCE_ID"
           echo "📍 Region: $REGION"
@@ -349,11 +485,15 @@ Resources:
               echo "✅ cfn-signal found"
 
               # Wait a moment for tags to be available
-              sleep 10
+              sleep 15
 
               # Try to get stack name from tags
               echo "🔍 Looking for stack name in instance tags..."
-              STACK_NAME=$(aws ec2 describe-tags --region $REGION --filters "Name=resource-id,Values=$INSTANCE_ID" "Name=key,Values=aws:cloudformation:stack-name" --query 'Tags[0].Value' --output text 2>/dev/null || echo "unknown")
+              if [ "$INSTANCE_ID" != "unknown" ]; then
+                  STACK_NAME=$(aws ec2 describe-tags --region $REGION --filters "Name=resource-id,Values=$INSTANCE_ID" "Name=key,Values=aws:cloudformation:stack-name" --query 'Tags[0].Value' --output text 2>/dev/null || echo "unknown")
+              else
+                  STACK_NAME="unknown"
+              fi
 
               echo "📍 Stack name: $STACK_NAME"
 

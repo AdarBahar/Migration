@@ -63,29 +63,52 @@ class ElastiCacheProvisioner:
             sys.exit(1)
 
     def get_current_region(self):
-        """Get the current AWS region from various sources."""
+        """Get the current AWS region from various sources with IMDSv2 support."""
         try:
-            # Try to get region from EC2 metadata (works on EC2 instances)
+            # Method 1: Check for saved region file
+            if os.path.exists('.region'):
+                with open('.region', 'r') as f:
+                    region = f.read().strip()
+                    if region:
+                        print(f"🌍 Using region from .region file: {region}")
+                        return region
+
+            # Method 2: Try to get region from EC2 metadata with IMDSv2
             import urllib.request
             import urllib.error
 
             try:
-                region = urllib.request.urlopen(
-                    'http://169.254.169.254/latest/meta-data/placement/region',
-                    timeout=2
-                ).read().decode()
-                print(f"🌍 Detected region from EC2 metadata: {region}")
-                return region
-            except (urllib.error.URLError, urllib.error.HTTPError):
-                pass
+                # Get token for IMDSv2
+                token_request = urllib.request.Request(
+                    'http://169.254.169.254/latest/api/token',
+                    headers={'X-aws-ec2-metadata-token-ttl-seconds': '21600'}
+                )
+                token_request.get_method = lambda: 'PUT'
 
-            # Try to get from boto3 session
+                with urllib.request.urlopen(token_request, timeout=5) as response:
+                    token = response.read().decode().strip()
+
+                # Get region using token
+                region_request = urllib.request.Request(
+                    'http://169.254.169.254/latest/meta-data/placement/region',
+                    headers={'X-aws-ec2-metadata-token': token}
+                )
+
+                with urllib.request.urlopen(region_request, timeout=5) as response:
+                    region = response.read().decode().strip()
+                    print(f"🌍 Detected region from EC2 metadata (IMDSv2): {region}")
+                    return region
+
+            except (urllib.error.URLError, urllib.error.HTTPError) as e:
+                print(f"⚠️  IMDSv2 metadata access failed: {e}")
+
+            # Method 3: Try to get from boto3 session
             session = boto3.Session()
             if session.region_name:
                 print(f"🌍 Using region from boto3 session: {session.region_name}")
                 return session.region_name
 
-            # Try to get from AWS CLI config
+            # Method 4: Try to get from AWS CLI config
             try:
                 import subprocess
                 result = subprocess.run(['aws', 'configure', 'get', 'region'],
@@ -106,23 +129,35 @@ class ElastiCacheProvisioner:
             return 'us-east-1'
 
     def get_current_instance_info(self):
-        """Get information about the current EC2 instance."""
+        """Get information about the current EC2 instance with IMDSv2 support."""
         try:
             # Try to get instance metadata (only works on EC2)
             import urllib.request
             import urllib.error
 
-            # Get instance ID
+            # Get instance ID using IMDSv2
             try:
-                print("🔍 Attempting to get EC2 metadata...")
+                print("🔍 Attempting to get EC2 metadata with IMDSv2...")
 
-                # Try with longer timeout and better error handling
-                request = urllib.request.Request(
+                # Step 1: Get token for IMDSv2
+                token_request = urllib.request.Request(
+                    'http://169.254.169.254/latest/api/token',
+                    headers={'X-aws-ec2-metadata-token-ttl-seconds': '21600'}
+                )
+                token_request.get_method = lambda: 'PUT'
+
+                with urllib.request.urlopen(token_request, timeout=5) as response:
+                    token = response.read().decode().strip()
+
+                print(f"✅ Got IMDSv2 token")
+
+                # Step 2: Get instance ID using token
+                instance_request = urllib.request.Request(
                     'http://169.254.169.254/latest/meta-data/instance-id',
-                    headers={'User-Agent': 'ElastiCache-Provisioner/1.0'}
+                    headers={'X-aws-ec2-metadata-token': token}
                 )
 
-                with urllib.request.urlopen(request, timeout=5) as response:
+                with urllib.request.urlopen(instance_request, timeout=5) as response:
                     instance_id = response.read().decode().strip()
 
                 if not instance_id:
