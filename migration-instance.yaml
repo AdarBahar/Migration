@@ -103,11 +103,9 @@ Resources:
             Action: sts:AssumeRole
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
-        - arn:aws:iam::aws:policy/AmazonEC2ReadOnlyAccess
         - arn:aws:iam::aws:policy/AmazonElastiCacheFullAccess
-        - arn:aws:iam::aws:policy/AmazonVPCReadOnlyAccess
       Policies:
-        - PolicyName: CloudFormationSignaling
+        - PolicyName: ElastiCacheProvisioningPolicy
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
@@ -115,6 +113,18 @@ Resources:
                 Action:
                   - cloudformation:SignalResource
                   - ec2:DescribeTags
+                  - ec2:DescribeVpcs
+                  - ec2:DescribeSubnets
+                  - ec2:DescribeSecurityGroups
+                  - ec2:DescribeInstances
+                  - ec2:DescribeAvailabilityZones
+                  - ec2:CreateSecurityGroup
+                  - ec2:AuthorizeSecurityGroupIngress
+                  - ec2:CreateTags
+                  - elasticache:CreateCacheSubnetGroup
+                  - elasticache:DescribeCacheSubnetGroups
+                  - elasticache:CreateCacheParameterGroup
+                  - elasticache:DescribeCacheParameterGroups
                 Resource: '*'
 
   MigrationInstanceProfile:
