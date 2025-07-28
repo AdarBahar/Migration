@@ -175,15 +175,19 @@ Here’s what each script does in the `Migration` project:
 - ✅ **Uses default AMI**: `ami-042b4708b1d05f512` (Ubuntu 22.04 LTS in us-east-1)
 - ✅ **Default stack name**: `Redis-Migration-Tool`
 - ✅ **Updates system packages** (`apt update && upgrade`)
-- ✅ **Installs all dependencies**: Python 3, pip, venv, Git, curl, wget, AWS CLI
+- ✅ **Installs all dependencies**: Python 3, pip, venv, Git, curl, wget, unzip, AWS CLI
 - ✅ **Installs CloudFormation helpers** for proper signaling
 - ✅ **Clones this repository** from GitHub
 - ✅ **Creates virtual environment** and installs requirements
+- ✅ **Sets up IAM role** with ElastiCache, EC2, and VPC permissions
+- ✅ **Detects region automatically** (eu-north-1, us-east-1, etc.) with IMDSv2 support
+- ✅ **Creates region detection script** for ElastiCache provisioning
 - ✅ **Sets up security group** for SSH access from your IP only
 - ✅ **Creates convenience scripts** for easy environment activation
+- ✅ **Creates setup verification script** to test all components
 - ✅ **Sets proper file ownership** for ubuntu user
 - ✅ **Ensures public IP assignment** (requires public subnet with auto-assign enabled)
-- ✅ **Waits for completion**: Shows CREATE_COMPLETE only after all software is installed
+- ✅ **Waits for completion**: Shows CREATE_COMPLETE only after all software is installed (20 min timeout)
 
 ### CloudFormation Parameters:
 
@@ -222,11 +226,30 @@ Here’s what each script does in the `Migration` project:
 
 ### ⏱️ Deployment Timing:
 
-**Important**: The CloudFormation stack will show `CREATE_IN_PROGRESS` for 10-15 minutes while all software is being installed. The stack will only show `CREATE_COMPLETE` when everything is fully configured and ready to use.
+**Important**: The CloudFormation stack will show `CREATE_IN_PROGRESS` for 15-20 minutes while all software is being installed. The stack will only show `CREATE_COMPLETE` when everything is fully configured and ready to use.
 
 ### 🎯 After CloudFormation Deployment:
 
 Once your stack shows `CREATE_COMPLETE` (meaning all installation is finished):
+
+### 🔍 Verify Installation:
+
+```bash
+# SSH to your instance
+ssh -i /path/to/your-key.pem ubuntu@<public-ip>
+
+# Run the verification script
+cd /home/ubuntu/Migration
+./verify_setup.sh
+
+# Should show:
+# ✅ Region detected: eu-north-1 (or your region)
+# ✅ Virtual environment activated
+# ✅ AWS CLI available
+# ✅ ElastiCache provisioner ready
+```
+
+### 🚀 Provision ElastiCache (Out-of-the-Box):
 
 1. **Get the public IP** from the CloudFormation Outputs tab
 2. **SSH to your instance**:
@@ -253,21 +276,56 @@ Once your stack shows `CREATE_COMPLETE` (meaning all installation is finished):
    ./start-migration.sh
    ```
 
-4. **Verify everything is working**:
+4. **Provision ElastiCache (Out-of-the-Box)**:
    ```bash
-   # Check Python environment
-   which python
-   # Should show: /home/ubuntu/Migration/venv/bin/python
+   # Provision ElastiCache - now works automatically!
+   python provision_elasticache.py
 
-   # Start configuring Redis connections
-   python manage_env.py
+   # The script will:
+   # ✅ Auto-detect your region (eu-north-1, us-east-1, etc.)
+   # ✅ Auto-detect your VPC and subnets
+   # ✅ Create security groups automatically
+   # ✅ Provision ElastiCache cluster
+   # ✅ Update your .env file with connection details
    ```
+
+5. **Complete Migration Workflow**:
+   ```bash
+   # Configure environment variables (if needed)
+   python manage_env.py
+
+   # Generate test data
+   python DataFaker.py
+
+   # Compare databases
+   python DB_compare.py
+
+   # Run performance tests
+   python ReadWriteOps.py
+
+   # Clean up when done
+   python cleanup_elasticache.py
+   ```
+
+### 🎯 Key Features - Out-of-the-Box Ready:
+
+- ✅ **Automatic region detection** - Works in any AWS region
+- ✅ **IMDSv2 support** - Compatible with modern EC2 security settings
+- ✅ **Complete IAM permissions** - ElastiCache, EC2, VPC access included
+- ✅ **VPC auto-discovery** - Finds and uses your existing VPC
+- ✅ **Error handling** - Comprehensive fallbacks and manual options
+- ✅ **Verification tools** - Built-in setup verification script
 
 ### 🔧 Virtual Environment Notes:
 
 - **The venv is pre-installed** but needs to be activated in each SSH session
-- **All dependencies are already installed** (redis, python-dotenv, faker)
+- **All dependencies are already installed** (redis, python-dotenv, faker, boto3)
 - **The convenience script** `./start-migration.sh` provides activation instructions
 - **An alias** `activate-migration` is available after logout/login
+- **Verification script** `./verify_setup.sh` tests all components
+
+### 🚀 Ready to Use:
+
+Your CloudFormation deployment creates a **complete, production-ready** Redis migration environment that works immediately after deployment completes. No manual configuration required!
 
 Happy migrating! 🧠🔁📦
