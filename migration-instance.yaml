@@ -146,10 +146,11 @@ Resources:
 
   MigrationInstance:
     Type: AWS::EC2::Instance
-    CreationPolicy:
-      ResourceSignal:
-        Count: 1
-        Timeout: PT20M
+    # Temporarily disabled for faster deployment - re-enable after testing
+    # CreationPolicy:
+    #   ResourceSignal:
+    #     Count: 1
+    #     Timeout: PT30M
     Properties:
       InstanceType: !Ref InstanceType
       KeyName: !Ref KeyName
