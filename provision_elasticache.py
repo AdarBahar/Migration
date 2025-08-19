@@ -303,7 +303,13 @@ class ElastiCacheProvisioner:
     def create_security_group(self, vpc_id, source_security_groups):
         """Create a security group for ElastiCache that allows access from EC2."""
         sg_name = f"elasticache-redis-{int(time.time())}"
-        sg_description = "Security group for ElastiCache Redis - allows access from EC2 instances"
+
+        # Update description to reflect both SG-based and optional VPC CIDR access
+        allow_vpc_cidr = os.environ.get('ELASTICACHE_ALLOW_VPC_CIDR', 'false').lower() == 'true'
+        if allow_vpc_cidr:
+            sg_description = "Security group for ElastiCache Redis - allows access from EC2 security groups and VPC CIDR"
+        else:
+            sg_description = "Security group for ElastiCache Redis - allows access from specific EC2 security groups only"
 
         try:
             # Create security group
@@ -403,12 +409,14 @@ class ElastiCacheProvisioner:
                 print("💡 To enable: set environment variable ELASTICACHE_ALLOW_VPC_CIDR=true")
                 print("⚠️  Note: This allows any instance in the VPC to access ElastiCache")
 
-            # Tag the security group
+            # Tag the security group with access scope information
+            access_scope = "VPC-wide" if allow_vpc_cidr else "Security-Groups-only"
             self.ec2_client.create_tags(
                 Resources=[sg_id],
                 Tags=[
                     {'Key': 'Name', 'Value': f'ElastiCache-Redis-{sg_name}'},
                     {'Key': 'Purpose', 'Value': 'ElastiCache Redis Access'},
+                    {'Key': 'AccessScope', 'Value': access_scope},
                     {'Key': 'CreatedBy', 'Value': 'Migration-Tool'}
                 ]
             )
@@ -635,7 +643,6 @@ class ElastiCacheProvisioner:
 
         try:
             import socket
-            import time
 
             host = cache_info['endpoint']
             port = cache_info['port']
@@ -651,18 +658,48 @@ class ElastiCacheProvisioner:
                 if result == 0:
                     print(f"✅ TCP connection successful to {host}:{port}")
 
-                    # Try Redis PING command
+                    # Try Redis PING command using proper RESP protocol
                     try:
-                        sock.send(b"PING\r\n")
+                        # Send PING command in RESP format: *1\r\n$4\r\nPING\r\n
+                        ping_command = b"*1\r\n$4\r\nPING\r\n"
+                        sock.sendall(ping_command)  # Use sendall for robustness
+
+                        # Read response
                         response = sock.recv(1024)
-                        if b"PONG" in response:
-                            print(f"✅ Redis PING successful")
+
+                        # Check for proper RESP response: +PONG\r\n
+                        if response.startswith(b"+PONG\r\n"):
+                            print(f"✅ Redis PING successful (RESP protocol)")
+                            return True
+                        elif b"PONG" in response:
+                            print(f"✅ Redis PING successful (legacy response)")
                             return True
                         else:
-                            print(f"⚠️  Redis PING failed, but TCP connection works")
-                            return True  # TCP works, might be auth issue
+                            print(f"⚠️  Redis PING failed - response: {response[:50]}")
+                            print(f"💡 This might indicate:")
+                            print(f"   • AUTH token required (ElastiCache auth enabled)")
+                            print(f"   • TLS/SSL encryption required (in-transit encryption)")
+                            print(f"   • Different Redis protocol version")
+                            print(f"   • ElastiCache still initializing")
+                            return True  # TCP works, protocol/auth issue
+
+                    except socket.timeout:
+                        print(f"⚠️  Redis PING timeout - TCP works but no Redis response")
+                        print(f"💡 This might indicate:")
+                        print(f"   • TLS/SSL encryption required")
+                        print(f"   • AUTH token required")
+                        print(f"   • ElastiCache not fully ready")
+                        return True  # TCP works
+                    except ConnectionResetError:
+                        print(f"⚠️  Connection reset during Redis PING")
+                        print(f"💡 This might indicate:")
+                        print(f"   • TLS/SSL encryption required")
+                        print(f"   • AUTH token required")
+                        print(f"   • Security policy blocking plain text")
+                        return True  # TCP works
                     except Exception as e:
                         print(f"⚠️  Redis PING failed: {e}")
+                        print(f"💡 TCP connection works - likely AUTH/TLS requirement")
                         return True  # TCP works
                 else:
                     print(f"❌ TCP connection failed to {host}:{port}")
