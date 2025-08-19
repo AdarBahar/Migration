@@ -849,6 +849,71 @@ class ElastiCacheProvisioner:
         print(f"💾 Cache information saved to: {filename}")
         return filename
 
+    def update_env_file(self, cache_info, cache_name):
+        """Update the .env file with the new ElastiCache configuration."""
+        env_file_path = '.env'
+
+        # Configuration to add/update
+        redis_config = {
+            'REDIS_SOURCE_NAME': cache_name,
+            'REDIS_SOURCE_HOST': cache_info['endpoint'],
+            'REDIS_SOURCE_PORT': str(cache_info['port']),
+            'REDIS_SOURCE_PASSWORD': '',
+            'REDIS_SOURCE_TLS': 'false',
+            'REDIS_SOURCE_DB': '0'
+        }
+
+        try:
+            # Read existing .env file if it exists
+            existing_config = {}
+            if os.path.exists(env_file_path):
+                with open(env_file_path, 'r') as f:
+                    for line in f:
+                        line = line.strip()
+                        if line and not line.startswith('#') and '=' in line:
+                            key, value = line.split('=', 1)
+                            existing_config[key.strip()] = value.strip()
+
+            # Update with new Redis source configuration
+            existing_config.update(redis_config)
+
+            # Write updated configuration back to .env file
+            with open(env_file_path, 'w') as f:
+                f.write("# Redis Migration Configuration\n")
+                f.write(f"# Updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                f.write(f"# ElastiCache instance: {cache_name}\n")
+                f.write("\n")
+                f.write("# Source Redis Configuration (ElastiCache)\n")
+
+                # Write Redis source configuration first
+                for key in ['REDIS_SOURCE_NAME', 'REDIS_SOURCE_HOST', 'REDIS_SOURCE_PORT',
+                           'REDIS_SOURCE_PASSWORD', 'REDIS_SOURCE_TLS', 'REDIS_SOURCE_DB']:
+                    if key in existing_config:
+                        f.write(f"{key}={existing_config[key]}\n")
+
+                f.write("\n")
+                f.write("# Other Configuration\n")
+
+                # Write remaining configuration
+                for key, value in existing_config.items():
+                    if not key.startswith('REDIS_SOURCE_'):
+                        f.write(f"{key}={value}\n")
+
+            print(f"✅ Updated .env file with ElastiCache configuration")
+            print(f"📍 Source Redis configured:")
+            for key, value in redis_config.items():
+                display_value = value if value else "(empty)"
+                print(f"   {key}={display_value}")
+
+            return True
+
+        except Exception as e:
+            print(f"❌ Failed to update .env file: {e}")
+            print(f"💡 You can manually add these settings to your .env file:")
+            for key, value in redis_config.items():
+                print(f"   {key}={value}")
+            return False
+
     def display_security_configuration(self):
         """Display current security configuration settings."""
         allow_vpc_cidr = os.environ.get('ELASTICACHE_ALLOW_VPC_CIDR', 'false').lower() == 'true'
@@ -908,6 +973,7 @@ class ElastiCacheProvisioner:
         print(f"   6️⃣  Wait for ElastiCache to become available")
         print(f"   7️⃣  Verify network connectivity")
         print(f"   8️⃣  Generate configuration files")
+        print(f"   9️⃣  Configure .env file (optional)")
         print(f"")
 
         # Step 1: Get current instance information
@@ -1019,7 +1085,37 @@ class ElastiCacheProvisioner:
         print(f"      📄 {env_filename}")
         print(f"      📄 {info_filename}")
 
-        # Step 9: Display success information
+        # Step 9: Offer to update .env file
+        print(f"\n9️⃣  Configure .env file...")
+        update_env = 'n'  # Default value
+        env_updated = False  # Default value
+
+        if interactive:
+            print(f"🤔 Would you like to add this ElastiCache instance to your .env file")
+            print(f"   as the Source Redis configuration? (Y/n): ", end="")
+            update_env = input().strip().lower()
+
+            if update_env in ['', 'y', 'yes']:
+                print(f"📝 Updating .env file with ElastiCache configuration...")
+                env_updated = self.update_env_file(cache_info, created_cache_name)
+                if env_updated:
+                    print(f"   ✅ .env file updated successfully")
+                else:
+                    print(f"   ⚠️  .env file update failed, but configuration files are available")
+            else:
+                print(f"   ⏭️  Skipped .env file update")
+                print(f"   💡 You can manually copy settings from {env_filename}")
+        else:
+            # In non-interactive mode, show the configuration but don't update
+            print(f"   📋 ElastiCache configuration (add to your .env file):")
+            print(f"      REDIS_SOURCE_NAME={created_cache_name}")
+            print(f"      REDIS_SOURCE_HOST={cache_info['endpoint']}")
+            print(f"      REDIS_SOURCE_PORT={cache_info['port']}")
+            print(f"      REDIS_SOURCE_PASSWORD=")
+            print(f"      REDIS_SOURCE_TLS=false")
+            print(f"      REDIS_SOURCE_DB=0")
+
+        # Step 10: Display success information
         cache_type_display = "Serverless Cache" if cache_info.get('type') == 'serverless' else "Redis Cluster"
         print("\n" + "=" * 60)
         print(f"🎉 ElastiCache {cache_type_display} provisioned successfully!")
@@ -1034,13 +1130,20 @@ class ElastiCacheProvisioner:
         print("📁 Files created:")
         print(f"   - {env_filename} (Environment configuration)")
         print(f"   - {info_filename} (Cache information)")
+        if interactive and update_env in ['', 'y', 'yes'] and env_updated:
+            print(f"   - .env (Updated with Source Redis configuration)")
         print("")
         print("🔧 Next steps:")
-        print("1. Copy the configuration from the .env file to your main .env file")
-        print("2. Use manage_env.py to configure destination Redis if needed")
-        print("3. Test connection with DB_compare.py or ReadWriteOps.py")
+        if not (interactive and update_env in ['', 'y', 'yes'] and env_updated):
+            print("1. Add ElastiCache configuration to your .env file (see above)")
+            print("2. Use manage_env.py to configure destination Redis if needed")
+            print("3. Test connection with DB_compare.py or ReadWriteOps.py")
+        else:
+            print("1. Use manage_env.py to configure destination Redis if needed")
+            print("2. Test connection with DB_compare.py or ReadWriteOps.py")
+            print("3. Start your Redis migration!")
         print("")
-        print("💡 To connect to this Redis cache:")
+        print("💡 Connection details:")
         print(f"   Host: {cache_info['endpoint']}")
         print(f"   Port: {cache_info['port']}")
         print(f"   Password: (none)")
