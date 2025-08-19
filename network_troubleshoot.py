@@ -13,6 +13,8 @@ import json
 import socket
 import subprocess
 import sys
+import urllib.request
+import urllib.error
 from botocore.exceptions import ClientError, NoCredentialsError
 
 
@@ -36,8 +38,6 @@ class NetworkTroubleshooter:
     def get_current_region(self):
         """Get the current AWS region."""
         try:
-            import urllib.request
-            
             # Try IMDSv2 first
             try:
                 token_request = urllib.request.Request(
@@ -57,19 +57,17 @@ class NetworkTroubleshooter:
                 with urllib.request.urlopen(region_request, timeout=5) as response:
                     return response.read().decode().strip()
                     
-            except:
+            except (urllib.error.URLError, urllib.error.HTTPError, OSError):
                 # Fallback to boto3 session
                 session = boto3.Session()
                 return session.region_name or 'us-east-1'
-                
-        except:
+
+        except Exception:
             return 'us-east-1'
 
     def get_current_instance_info(self):
         """Get current EC2 instance information."""
         try:
-            import urllib.request
-            
             # Get instance ID using IMDSv2
             token_request = urllib.request.Request(
                 'http://169.254.169.254/latest/api/token',
@@ -123,12 +121,20 @@ class NetworkTroubleshooter:
                 # Check outbound rules for Redis
                 redis_outbound = False
                 for rule in sg.get('SecurityGroupEgress', []):
-                    if (rule.get('FromPort') == 6379 or 
-                        rule.get('IpProtocol') == '-1' or
-                        (rule.get('FromPort', 0) <= 6379 <= rule.get('ToPort', 65535))):
+                    protocol = rule.get('IpProtocol')
+                    from_port = rule.get('FromPort')
+                    to_port = rule.get('ToPort')
+
+                    # Check if rule allows Redis traffic
+                    if protocol == '-1':  # All protocols and ports
                         redis_outbound = True
-                        print(f"   ✅ Outbound Redis (6379) allowed: {rule}")
+                        print(f"   ✅ Outbound Redis (6379) allowed (all traffic): {rule}")
                         break
+                    elif protocol == 'tcp' and from_port is not None and to_port is not None:
+                        if from_port <= 6379 <= to_port:
+                            redis_outbound = True
+                            print(f"   ✅ Outbound Redis (6379) allowed: {rule}")
+                            break
                 
                 if not redis_outbound:
                     print(f"   ⚠️  No explicit outbound rule for Redis port 6379")
@@ -181,13 +187,20 @@ class NetworkTroubleshooter:
                 # Check for Redis port rules
                 redis_rules = []
                 for entry in nacl.get('Entries', []):
+                    protocol = entry.get('Protocol')
                     port_range = entry.get('PortRange', {})
-                    from_port = port_range.get('From', 0)
-                    to_port = port_range.get('To', 65535)
-                    
-                    if (entry.get('Protocol') == '6' and  # TCP
-                        from_port <= 6379 <= to_port):
+
+                    # Check if rule affects Redis traffic
+                    if protocol == '-1':  # All protocols
                         redis_rules.append(entry)
+                    elif protocol == '6':  # TCP protocol
+                        # Only check port range if PortRange exists (not for protocol -1)
+                        if port_range:
+                            from_port = port_range.get('From')
+                            to_port = port_range.get('To')
+                            if from_port is not None and to_port is not None:
+                                if from_port <= 6379 <= to_port:
+                                    redis_rules.append(entry)
                 
                 if redis_rules:
                     print(f"   📍 Rules affecting Redis port 6379:")
@@ -204,39 +217,62 @@ class NetworkTroubleshooter:
     def test_connectivity(self, host, port=6379, timeout=10):
         """Test TCP connectivity to a host and port."""
         print(f"\n🔍 Testing connectivity to {host}:{port}...")
-        
+
+        sock = None
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.settimeout(timeout)
-            
+
             result = sock.connect_ex((host, port))
             if result == 0:
                 print(f"✅ TCP connection successful")
-                
-                # Try Redis PING
+
+                # Try Redis PING using proper RESP protocol
                 try:
-                    sock.send(b"PING\r\n")
+                    # Send PING command in RESP format: *1\r\n$4\r\nPING\r\n
+                    ping_command = b"*1\r\n$4\r\nPING\r\n"
+                    sock.send(ping_command)
+
+                    # Read response
                     response = sock.recv(1024)
-                    if b"PONG" in response:
-                        print(f"✅ Redis PING successful")
+
+                    # Check for proper RESP response: +PONG\r\n
+                    if response.startswith(b"+PONG\r\n"):
+                        print(f"✅ Redis PING successful (RESP protocol)")
+                    elif b"PONG" in response:
+                        print(f"✅ Redis PING successful (legacy response)")
                     else:
-                        print(f"⚠️  Redis PING failed, but TCP works")
-                except:
-                    print(f"⚠️  Could not send Redis PING")
-                
+                        print(f"⚠️  Redis PING failed, response: {response[:50]}")
+                        print(f"⚠️  TCP connection works, might be auth required or different protocol")
+
+                except socket.timeout:
+                    print(f"⚠️  Redis PING timeout, but TCP connection works")
+                except ConnectionResetError:
+                    print(f"⚠️  Connection reset during Redis PING, but TCP connection works")
+                except Exception as e:
+                    print(f"⚠️  Redis PING failed: {e}")
+                    print(f"⚠️  TCP connection works, Redis protocol issue")
+
                 return True
             else:
                 print(f"❌ TCP connection failed (error code: {result})")
                 return False
-                
+
+        except socket.gaierror as e:
+            print(f"❌ DNS resolution failed: {e}")
+            return False
+        except socket.timeout:
+            print(f"❌ Connection timeout after {timeout} seconds")
+            return False
         except Exception as e:
             print(f"❌ Connection test failed: {e}")
             return False
         finally:
-            try:
-                sock.close()
-            except:
-                pass
+            if sock:
+                try:
+                    sock.close()
+                except Exception:
+                    pass
 
     def run_diagnostics(self, elasticache_endpoint=None, elasticache_sg_id=None):
         """Run comprehensive network diagnostics."""
