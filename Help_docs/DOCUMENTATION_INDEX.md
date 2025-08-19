@@ -17,7 +17,7 @@ This repository contains comprehensive documentation for the Redis Migration Too
 
 ## 📖 **Core Documentation**
 
-### **[README.md](README.md)**
+### **[README.md](../README.md)**
 **Main project overview and quick start**
 - Project description and features
 - Quick AWS setup with CloudFormation
@@ -57,7 +57,7 @@ This repository contains comprehensive documentation for the Redis Migration Too
 
 #### **🆕 New Users**
 1. **[WALKTHROUGH.md](WALKTHROUGH.md)** - Complete step-by-step guide
-2. **[README.md](README.md)** - Project overview
+2. **[README.md](../README.md)** - Project overview
 3. **[migration-instance.md](migration-instance.md)** - Deployment details
 
 #### **🔧 Deployment Issues**
@@ -67,7 +67,7 @@ This repository contains comprehensive documentation for the Redis Migration Too
 
 #### **⚡ Quick Start**
 1. **[WALKTHROUGH.md](WALKTHROUGH.md)** - Steps 1-3 for deployment
-2. **[README.md](README.md)** - Quick start commands
+2. **[README.md](../README.md)** - Quick start commands
 3. **Tool help**: `python script_name.py --help`
 
 #### **🏗️ Advanced Configuration**
@@ -88,7 +88,7 @@ All documentation includes:
 ## 🎯 **Recommended Reading Order**
 
 ### **For New Users:**
-1. **[README.md](README.md)** - Understand what the tool does
+1. **[README.md](../README.md)** - Understand what the tool does
 2. **[WALKTHROUGH.md](WALKTHROUGH.md)** - Follow complete deployment guide
 3. **[TROUBLESHOOTING.md](TROUBLESHOOTING.md)** - If you encounter issues
 

@@ -10,7 +10,7 @@ A collection of Python tools to manage, test, and verify synchronization between
 
 ## 📖 **NEW: Complete Walkthrough Guide**
 
-🎯 **[WALKTHROUGH.md](WALKTHROUGH.md)** - **Complete step-by-step guide** from deployment to migration testing!
+🎯 **[WALKTHROUGH.md](Help_docs/WALKTHROUGH.md)** - **Complete step-by-step guide** from deployment to migration testing!
 
 This comprehensive guide covers:
 - ✅ CloudFormation deployment with exact commands
@@ -28,7 +28,7 @@ Want to quickly set up an AWS EC2 instance with everything pre-configured? Use o
 
 👉 **[Launch Stack](https://console.aws.amazon.com/cloudformation/home?#/stacks/create/review?templateURL=https://adar-testing.s3.eu-north-1.amazonaws.com/migration-instance.yaml)**
 
-📖 **[Detailed Setup Guide](migration-instance.md)** - Complete walkthrough including manual setup steps
+📖 **[Detailed Setup Guide](Help_docs/migration-instance.md)** - Complete walkthrough including manual setup steps
 
 ### ✨ What the CloudFormation Template Does:
 - **Creates Ubuntu EC2 instance** with default AMI `ami-042b4708b1d05f512` (Ubuntu 22.04 LTS)
@@ -43,7 +43,7 @@ Want to quickly set up an AWS EC2 instance with everything pre-configured? Use o
 ### 🎯 After Deployment:
 1. **SSH to your instance**: `ssh -i /path/to/your-key.pem ubuntu@<public-ip>`
 2. **Activate environment**: `cd Migration && source venv/bin/activate`
-3. **Follow the walkthrough**: See [WALKTHROUGH.md](WALKTHROUGH.md) for complete step-by-step instructions
+3. **Follow the walkthrough**: See [WALKTHROUGH.md](Help_docs/WALKTHROUGH.md) for complete step-by-step instructions
 4. **Start using tools**: `python manage_env.py`
 
 ### ⚡ Quick Start Commands:
@@ -302,7 +302,7 @@ python provision_elasticache.py --auto
 python provision_elasticache.py --auto --node-type cache.t3.small --engine-version 7.0
 ```
 
-📖 **[Complete ElastiCache Guide](ELASTICACHE_README.md)** - Detailed documentation and troubleshooting
+📖 **[Complete ElastiCache Guide](Help_docs/ELASTICACHE_README.md)** - Detailed documentation and troubleshooting
 
 ---
 
