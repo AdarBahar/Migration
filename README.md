@@ -42,32 +42,69 @@ Want to quickly set up an AWS EC2 instance with everything pre-configured? Use o
 
 ### 🎯 After Deployment:
 1. **SSH to your instance**: `ssh -i /path/to/your-key.pem ubuntu@<public-ip>`
-2. **Activate environment**: `cd Migration && source venv/bin/activate`
-3. **Follow the walkthrough**: See [WALKTHROUGH.md](Help_docs/WALKTHROUGH.md) for complete step-by-step instructions
-4. **Start using tools**: `python manage_env.py`
+2. **Run the start script**: `cd Migration && ./Start`
+3. **Follow intelligent suggestions**: The Migration Control Center will guide you through the optimal workflow
+4. **Use the interactive menu**: All tools accessible through the central interface
 
-### ⚡ Quick Start Commands:
+### ⚡ One-Command Startup:
 ```bash
 # After SSH to instance
-cd /home/ubuntu/Migration && source venv/bin/activate
+cd /home/ubuntu/Migration && ./Start
+```
 
-# 1. Provision ElastiCache (auto-detects region and VPC)
-python provision_elasticache.py
+**What the Start script does:**
+- ✅ Sets up Python virtual environment
+- ✅ Installs all dependencies
+- ✅ Creates initial .env configuration
+- ✅ Launches Migration Control Center
+- ✅ Provides intelligent workflow suggestions
 
-# 2. Configure connections
-python manage_env.py
+### 🎯 Migration Control Center Features:
+- 🧠 **Intelligent Suggestions**: Detects environment state and suggests next steps
+- 📋 **Organized Menu**: Scripts categorized by Setup, Data, Migration, Maintenance, Troubleshooting
+- 🔄 **Automatic Return**: Each script returns to main menu when completed
+- ✅ **Status Indicators**: Real-time environment and ElastiCache status
+- 💡 **Smart Workflow**: Guides you through optimal migration process
 
-# 3. Generate test data
-python DataFaker.py
+**Available Operations:**
+```
+🚀 Setup & Configuration
+  1. Provision ElastiCache - Create AWS ElastiCache Redis instance
+  2. Manage Environment - Configure Redis connection settings
 
-# 4. Compare databases
-python DB_compare.py
+📊 Data Management
+  3. Generate Test Data - Create sample data for migration testing
 
-# 5. Run performance tests
-python ReadWriteOps.py
-``` to configure Redis connections
+🔄 Migration Operations
+  4. Compare Databases - Compare source and destination Redis instances
+  5. Migration Operations - Perform read/write operations and migration
 
-### 💡 Quick Environment Activation:
+🧹 Maintenance
+  6. Flush Database - Clear all data from Redis database
+  7. Cleanup ElastiCache - Remove ElastiCache instances and resources
+
+🔧 Troubleshooting
+  8. Network Troubleshooting - Diagnose network connectivity issues
+  9. Test Security Config - Test ElastiCache security configuration
+```
+
+### 🧠 Intelligent Workflow Management:
+
+The Migration Control Center automatically detects your environment state and provides smart suggestions:
+
+- **🔴 High Priority**: Missing ElastiCache instance → Suggests provisioning
+- **🔴 High Priority**: Empty .env file → Suggests environment configuration
+- **🟡 Medium Priority**: No test data → Suggests data generation
+- **✅ Ready**: All configured → Suggests migration operations
+
+**Example workflow:**
+1. Run `./Start` → Launches control center
+2. See suggestion: "No ElastiCache instance found" → Run option 1
+3. See suggestion: "Environment not configured" → Run option 2
+4. See suggestion: "No test data found" → Run option 3
+5. Environment ready → Run migration operations (options 4-5)
+
+### 💡 Manual Environment Activation (if needed):
 ```bash
 # Method 1: Manual activation (recommended)
 cd /home/ubuntu/Migration && source venv/bin/activate
