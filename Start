@@ -1,0 +1,169 @@
+#!/bin/bash
+# 🚀 Redis Migration Tool - Start Script
+# 
+# This script initializes the Redis migration environment and launches the main interface.
+# It handles environment setup, dependency installation, and launches the migration index.
+#
+# Usage: ./Start
+# Author: Migration Project
+
+set -e  # Exit on any error
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+PURPLE='\033[0;35m'
+CYAN='\033[0;36m'
+NC='\033[0m' # No Color
+
+# Function to print colored output
+print_status() {
+    echo -e "${GREEN}✅ $1${NC}"
+}
+
+print_info() {
+    echo -e "${BLUE}ℹ️  $1${NC}"
+}
+
+print_warning() {
+    echo -e "${YELLOW}⚠️  $1${NC}"
+}
+
+print_error() {
+    echo -e "${RED}❌ $1${NC}"
+}
+
+print_header() {
+    echo -e "${PURPLE}🚀 $1${NC}"
+}
+
+print_step() {
+    echo -e "${CYAN}📋 $1${NC}"
+}
+
+# Main function
+main() {
+    clear
+    print_header "Redis Migration Tool - Initialization"
+    echo "=" * 60
+    echo ""
+    
+    print_info "Initializing Redis migration environment..."
+    echo ""
+    
+    # Step 1: Check if we're in the right directory
+    print_step "Step 1: Verifying project directory..."
+    if [[ ! -f "provision_elasticache.py" ]] || [[ ! -f "manage_env.py" ]]; then
+        print_error "This doesn't appear to be the Migration project directory"
+        print_info "Please run this script from the Migration project root directory"
+        exit 1
+    fi
+    print_status "Project directory verified"
+    
+    # Step 2: Check Python installation
+    print_step "Step 2: Checking Python installation..."
+    if ! command -v python3 &> /dev/null; then
+        print_error "Python 3 is not installed or not in PATH"
+        print_info "Please install Python 3 and try again"
+        exit 1
+    fi
+    
+    PYTHON_VERSION=$(python3 --version 2>&1 | cut -d' ' -f2)
+    print_status "Python $PYTHON_VERSION found"
+    
+    # Step 3: Create virtual environment if it doesn't exist
+    print_step "Step 3: Setting up Python virtual environment..."
+    if [[ ! -d "venv" ]]; then
+        print_info "Creating virtual environment..."
+        python3 -m venv venv
+        print_status "Virtual environment created"
+    else
+        print_status "Virtual environment already exists"
+    fi
+    
+    # Step 4: Activate virtual environment
+    print_step "Step 4: Activating virtual environment..."
+    source venv/bin/activate
+    print_status "Virtual environment activated"
+    
+    # Step 5: Install/upgrade dependencies
+    print_step "Step 5: Installing dependencies..."
+    if [[ -f "requirements.txt" ]]; then
+        print_info "Installing packages from requirements.txt..."
+        pip install --upgrade pip > /dev/null 2>&1
+        pip install -r requirements.txt > /dev/null 2>&1
+        print_status "Dependencies installed successfully"
+    else
+        print_warning "requirements.txt not found, installing basic dependencies..."
+        pip install --upgrade pip boto3 redis > /dev/null 2>&1
+        print_status "Basic dependencies installed"
+    fi
+    
+    # Step 6: Create .env file if it doesn't exist
+    print_step "Step 6: Checking environment configuration..."
+    if [[ ! -f ".env" ]]; then
+        print_info "Creating initial .env file..."
+        cat > .env << 'EOF'
+# Redis Migration Configuration
+# Created by Start script
+
+# Source Redis Configuration (ElastiCache)
+REDIS_SOURCE_NAME=
+REDIS_SOURCE_HOST=
+REDIS_SOURCE_PORT=6379
+REDIS_SOURCE_PASSWORD=
+REDIS_SOURCE_TLS=false
+REDIS_SOURCE_DB=0
+
+# Destination Redis Configuration
+REDIS_DEST_NAME=
+REDIS_DEST_HOST=
+REDIS_DEST_PORT=6379
+REDIS_DEST_PASSWORD=
+REDIS_DEST_TLS=false
+REDIS_DEST_DB=0
+
+# Migration Settings
+REDIS_TIMEOUT=5
+LOG_LEVEL=INFO
+EOF
+        print_status "Initial .env file created"
+    else
+        print_status ".env file already exists"
+    fi
+    
+    # Step 7: Check AWS credentials
+    print_step "Step 7: Checking AWS credentials..."
+    if python3 -c "import boto3; boto3.Session().get_credentials()" > /dev/null 2>&1; then
+        print_status "AWS credentials configured"
+    else
+        print_warning "AWS credentials not configured"
+        print_info "You may need to run 'aws configure' or set environment variables"
+        print_info "This is required for ElastiCache provisioning"
+    fi
+    
+    # Step 8: Make scripts executable
+    print_step "Step 8: Setting script permissions..."
+    chmod +x Start 2>/dev/null || true
+    chmod +x *.sh 2>/dev/null || true
+    print_status "Script permissions set"
+    
+    echo ""
+    print_header "Initialization Complete!"
+    echo ""
+    print_status "Environment is ready for Redis migration"
+    print_info "Launching Migration Control Center..."
+    echo ""
+    
+    # Step 9: Launch the main index
+    sleep 2
+    python3 index.py
+}
+
+# Trap to handle script interruption
+trap 'print_error "Script interrupted"; exit 1' INT
+
+# Run main function
+main "$@"
