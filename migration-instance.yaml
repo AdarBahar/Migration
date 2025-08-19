@@ -136,7 +136,7 @@ Resources:
   MigrationSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: Allow SSH from MyIP and Redis connectivity
+      GroupDescription: Allow SSH from MyIP with unrestricted outbound access
       VpcId: !Ref VpcId
       SecurityGroupIngress:
         - IpProtocol: tcp
@@ -145,31 +145,12 @@ Resources:
           CidrIp: !Ref MyIP
           Description: SSH access from MyIP
       SecurityGroupEgress:
-        - IpProtocol: tcp
-          FromPort: 6379
-          ToPort: 6379
+        # Allow all outbound traffic - simpler and future-proof
+        # This replaces specific rules for HTTP/HTTPS/DNS/Redis which would
+        # require maintenance as requirements change
+        - IpProtocol: -1
           CidrIp: 0.0.0.0/0
-          Description: Redis outbound access
-        - IpProtocol: tcp
-          FromPort: 80
-          ToPort: 80
-          CidrIp: 0.0.0.0/0
-          Description: HTTP outbound access
-        - IpProtocol: tcp
-          FromPort: 443
-          ToPort: 443
-          CidrIp: 0.0.0.0/0
-          Description: HTTPS outbound access
-        - IpProtocol: tcp
-          FromPort: 53
-          ToPort: 53
-          CidrIp: 0.0.0.0/0
-          Description: DNS TCP outbound access
-        - IpProtocol: udp
-          FromPort: 53
-          ToPort: 53
-          CidrIp: 0.0.0.0/0
-          Description: DNS UDP outbound access
+          Description: Allow all outbound traffic (simpler and future-proof)
 
   MigrationInstance:
     Type: AWS::EC2::Instance
@@ -201,19 +182,22 @@ Resources:
           exec > >(tee /var/log/user-data.log) 2>&1
           echo "🚀 Starting UserData script at $(date)"
 
+          # Set noninteractive frontend to avoid prompts (e.g., tzdata)
+          export DEBIAN_FRONTEND=noninteractive
+
           # Don't exit on error initially - let's see what fails
           set +e
 
           # Update system
           echo "📦 Updating system packages..."
-          apt update -y
+          apt-get update -y
           if [ $? -eq 0 ]; then
               echo "✅ System update successful"
           else
               echo "❌ System update failed"
           fi
 
-          apt upgrade -y
+          apt-get upgrade -y
           if [ $? -eq 0 ]; then
               echo "✅ System upgrade successful"
           else
@@ -222,10 +206,10 @@ Resources:
 
           # Install required packages
           echo "📦 Installing required packages..."
-          apt install -y software-properties-common
+          apt-get install -y software-properties-common
           add-apt-repository universe -y
-          apt update -y
-          apt install -y python3 python3-pip python3-venv git curl wget redis-tools
+          apt-get update -y
+          apt-get install -y python3 python3-pip python3-venv git curl wget redis-tools
           if [ $? -eq 0 ]; then
               echo "✅ Package installation successful"
           else
@@ -233,7 +217,7 @@ Resources:
           fi
 
           # Install CloudFormation helper scripts
-          apt install -y python3-pip
+          apt-get install -y python3-pip
           pip3 install https://s3.amazonaws.com/cloudformation-examples/aws-cfn-bootstrap-py3-latest.tar.gz
 
           # Create symbolic link for cfn-signal
@@ -286,7 +270,7 @@ Resources:
 
           # Install AWS CLI for easier AWS management
           echo "📦 Installing AWS CLI..."
-          apt install -y unzip
+          apt-get install -y unzip
           if [ $? -eq 0 ]; then
               echo "✅ unzip installed successfully"
           else
