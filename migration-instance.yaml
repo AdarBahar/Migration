@@ -136,13 +136,40 @@ Resources:
   MigrationSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: Allow SSH from MyIP
+      GroupDescription: Allow SSH from MyIP and Redis connectivity
       VpcId: !Ref VpcId
       SecurityGroupIngress:
         - IpProtocol: tcp
           FromPort: 22
           ToPort: 22
           CidrIp: !Ref MyIP
+          Description: SSH access from MyIP
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 6379
+          ToPort: 6379
+          CidrIp: 0.0.0.0/0
+          Description: Redis outbound access
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+          Description: HTTP outbound access
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+          Description: HTTPS outbound access
+        - IpProtocol: tcp
+          FromPort: 53
+          ToPort: 53
+          CidrIp: 0.0.0.0/0
+          Description: DNS TCP outbound access
+        - IpProtocol: udp
+          FromPort: 53
+          ToPort: 53
+          CidrIp: 0.0.0.0/0
+          Description: DNS UDP outbound access
 
   MigrationInstance:
     Type: AWS::EC2::Instance
@@ -198,7 +225,7 @@ Resources:
           apt install -y software-properties-common
           add-apt-repository universe -y
           apt update -y
-          apt install -y python3 python3-pip python3-venv git curl wget
+          apt install -y python3 python3-pip python3-venv git curl wget redis-tools
           if [ $? -eq 0 ]; then
               echo "✅ Package installation successful"
           else

@@ -294,7 +294,7 @@ class ElastiCacheProvisioner:
         """Create a security group for ElastiCache that allows access from EC2."""
         sg_name = f"elasticache-redis-{int(time.time())}"
         sg_description = "Security group for ElastiCache Redis - allows access from EC2 instances"
-        
+
         try:
             # Create security group
             response = self.ec2_client.create_security_group(
@@ -302,10 +302,10 @@ class ElastiCacheProvisioner:
                 Description=sg_description,
                 VpcId=vpc_id
             )
-            
+
             sg_id = response['GroupId']
             print(f"✅ Created security group: {sg_id}")
-            
+
             # Add inbound rule for Redis port (6379) from source security groups
             for source_sg in source_security_groups:
                 self.ec2_client.authorize_security_group_ingress(
@@ -325,7 +325,28 @@ class ElastiCacheProvisioner:
                     ]
                 )
                 print(f"✅ Added inbound rule for Redis port 6379 from SG {source_sg}")
-            
+
+            # Also add inbound rule from VPC CIDR for broader access within VPC
+            try:
+                vpc_info = self.ec2_client.describe_vpcs(VpcIds=[vpc_id])
+                vpc_cidr = vpc_info['Vpcs'][0]['CidrBlock']
+
+                self.ec2_client.authorize_security_group_ingress(
+                    GroupId=sg_id,
+                    IpPermissions=[
+                        {
+                            'IpProtocol': 'tcp',
+                            'FromPort': 6379,
+                            'ToPort': 6379,
+                            'CidrIp': vpc_cidr,
+                            'Description': f'Redis access from VPC CIDR {vpc_cidr}'
+                        }
+                    ]
+                )
+                print(f"✅ Added inbound rule for Redis port 6379 from VPC CIDR {vpc_cidr}")
+            except Exception as e:
+                print(f"⚠️  Could not add VPC CIDR rule: {e}")
+
             # Tag the security group
             self.ec2_client.create_tags(
                 Resources=[sg_id],
@@ -335,9 +356,9 @@ class ElastiCacheProvisioner:
                     {'Key': 'CreatedBy', 'Value': 'Migration-Tool'}
                 ]
             )
-            
+
             return sg_id
-            
+
         except Exception as e:
             print(f"❌ Failed to create security group: {e}")
             return None
@@ -552,6 +573,56 @@ class ElastiCacheProvisioner:
 
         return "\n".join(config_lines)
 
+    def verify_network_connectivity(self, cache_info):
+        """Verify network connectivity to the ElastiCache instance."""
+        print(f"\n🔍 Verifying network connectivity to Redis...")
+
+        try:
+            import socket
+            import time
+
+            host = cache_info['endpoint']
+            port = cache_info['port']
+
+            print(f"📍 Testing connection to {host}:{port}")
+
+            # Test basic TCP connectivity
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(10)
+
+            try:
+                result = sock.connect_ex((host, port))
+                if result == 0:
+                    print(f"✅ TCP connection successful to {host}:{port}")
+
+                    # Try Redis PING command
+                    try:
+                        sock.send(b"PING\r\n")
+                        response = sock.recv(1024)
+                        if b"PONG" in response:
+                            print(f"✅ Redis PING successful")
+                            return True
+                        else:
+                            print(f"⚠️  Redis PING failed, but TCP connection works")
+                            return True  # TCP works, might be auth issue
+                    except Exception as e:
+                        print(f"⚠️  Redis PING failed: {e}")
+                        return True  # TCP works
+                else:
+                    print(f"❌ TCP connection failed to {host}:{port}")
+                    print(f"💡 This might indicate:")
+                    print(f"   • Security group rules not allowing traffic")
+                    print(f"   • Network ACL blocking traffic")
+                    print(f"   • ElastiCache not fully available yet")
+                    return False
+
+            finally:
+                sock.close()
+
+        except Exception as e:
+            print(f"❌ Network connectivity test failed: {e}")
+            return False
+
     def save_cache_info(self, cache_name, cache_info, security_group_id, subnet_group_name):
         """Save cache information to a file for future reference."""
         info = {
@@ -678,7 +749,14 @@ class ElastiCacheProvisioner:
             print("❌ Cache did not become available within timeout period")
             return False
 
-        # Step 7: Generate configuration
+        # Step 7: Verify network connectivity
+        print(f"\n📋 Verifying network connectivity...")
+        connectivity_ok = self.verify_network_connectivity(cache_info)
+        if not connectivity_ok:
+            print("⚠️  Network connectivity test failed, but continuing...")
+            print("💡 You may need to check security groups and network ACLs manually")
+
+        # Step 8: Generate configuration
         print(f"\n📋 Generating configuration...")
         env_config = self.generate_env_config(cache_info, created_cache_name)
 
@@ -690,7 +768,7 @@ class ElastiCacheProvisioner:
         # Save cache info
         info_filename = self.save_cache_info(created_cache_name, cache_info, security_group_id, subnet_group_name)
 
-        # Step 8: Display success information
+        # Step 9: Display success information
         cache_type_display = "Serverless Cache" if cache_info.get('type') == 'serverless' else "Redis Cluster"
         print("\n" + "=" * 60)
         print(f"🎉 ElastiCache {cache_type_display} provisioned successfully!")
