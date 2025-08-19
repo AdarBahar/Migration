@@ -7,10 +7,20 @@ to allow the current EC2 instance to connect to it.
 
 Features:
 - Creates ElastiCache Redis cluster
-- Configures security groups for EC2 access
+- Configures security groups for EC2 access (least privilege by default)
 - Sets up subnet groups for proper networking
 - Provides connection details for .env configuration
 - Handles both single-node and cluster configurations
+- Optional VPC-wide access (gated behind explicit opt-in)
+
+Security Configuration:
+- By default, only allows access from the specific EC2 security groups
+- VPC CIDR access can be enabled with: ELASTICACHE_ALLOW_VPC_CIDR=true
+- Supports both IPv4 and IPv6 VPC CIDRs when VPC access is enabled
+
+Environment Variables:
+- ELASTICACHE_ALLOW_VPC_CIDR: Set to 'true' to allow access from entire VPC CIDR
+  (default: 'false' for security - only specific security groups allowed)
 
 Author: Migration Project
 """
@@ -326,26 +336,72 @@ class ElastiCacheProvisioner:
                 )
                 print(f"✅ Added inbound rule for Redis port 6379 from SG {source_sg}")
 
-            # Also add inbound rule from VPC CIDR for broader access within VPC
-            try:
-                vpc_info = self.ec2_client.describe_vpcs(VpcIds=[vpc_id])
-                vpc_cidr = vpc_info['Vpcs'][0]['CidrBlock']
+            # Optionally add inbound rule from VPC CIDR for broader access within VPC
+            # This is gated behind an explicit opt-in to honor least privilege principle
+            allow_vpc_cidr = os.environ.get('ELASTICACHE_ALLOW_VPC_CIDR', 'false').lower() == 'true'
 
-                self.ec2_client.authorize_security_group_ingress(
-                    GroupId=sg_id,
-                    IpPermissions=[
-                        {
-                            'IpProtocol': 'tcp',
-                            'FromPort': 6379,
-                            'ToPort': 6379,
-                            'CidrIp': vpc_cidr,
-                            'Description': f'Redis access from VPC CIDR {vpc_cidr}'
-                        }
-                    ]
-                )
-                print(f"✅ Added inbound rule for Redis port 6379 from VPC CIDR {vpc_cidr}")
-            except Exception as e:
-                print(f"⚠️  Could not add VPC CIDR rule: {e}")
+            if allow_vpc_cidr:
+                try:
+                    print("🔓 VPC CIDR access enabled via ELASTICACHE_ALLOW_VPC_CIDR=true")
+                    vpc_info = self.ec2_client.describe_vpcs(VpcIds=[vpc_id])
+                    vpc = vpc_info['Vpcs'][0]
+
+                    # Get all IPv4 CIDR blocks associated with the VPC
+                    cidr_blocks = [vpc['CidrBlock']]  # Primary CIDR
+
+                    # Add any additional IPv4 CIDR blocks
+                    for association in vpc.get('CidrBlockAssociationSet', []):
+                        if (association.get('CidrBlockState', {}).get('State') == 'associated' and
+                            association.get('CidrBlock') not in cidr_blocks):
+                            cidr_blocks.append(association['CidrBlock'])
+
+                    # Build IpRanges for IPv4 CIDRs
+                    ip_ranges = []
+                    for cidr in cidr_blocks:
+                        ip_ranges.append({
+                            'CidrIp': cidr,
+                            'Description': f'Redis access from VPC CIDR {cidr}'
+                        })
+
+                    # Build IpPermissions with proper structure
+                    ip_permissions = {
+                        'IpProtocol': 'tcp',
+                        'FromPort': 6379,
+                        'ToPort': 6379,
+                        'IpRanges': ip_ranges
+                    }
+
+                    # Add IPv6 ranges if the VPC has them
+                    ipv6_ranges = []
+                    for association in vpc.get('Ipv6CidrBlockAssociationSet', []):
+                        if association.get('Ipv6CidrBlockState', {}).get('State') == 'associated':
+                            ipv6_cidr = association.get('Ipv6CidrBlock')
+                            if ipv6_cidr:
+                                ipv6_ranges.append({
+                                    'CidrIpv6': ipv6_cidr,
+                                    'Description': f'Redis access from VPC IPv6 CIDR {ipv6_cidr}'
+                                })
+
+                    if ipv6_ranges:
+                        ip_permissions['Ipv6Ranges'] = ipv6_ranges
+
+                    self.ec2_client.authorize_security_group_ingress(
+                        GroupId=sg_id,
+                        IpPermissions=[ip_permissions]
+                    )
+
+                    print(f"✅ Added inbound rules for Redis port 6379 from VPC CIDRs:")
+                    for cidr in cidr_blocks:
+                        print(f"   📍 IPv4: {cidr}")
+                    for ipv6_range in ipv6_ranges:
+                        print(f"   📍 IPv6: {ipv6_range['CidrIpv6']}")
+
+                except Exception as e:
+                    print(f"⚠️  Could not add VPC CIDR rules: {e}")
+            else:
+                print("🔒 VPC CIDR access disabled (default for security)")
+                print("💡 To enable: set environment variable ELASTICACHE_ALLOW_VPC_CIDR=true")
+                print("⚠️  Note: This allows any instance in the VPC to access ElastiCache")
 
             # Tag the security group
             self.ec2_client.create_tags(
@@ -645,6 +701,21 @@ class ElastiCacheProvisioner:
         print(f"💾 Cache information saved to: {filename}")
         return filename
 
+    def display_security_configuration(self):
+        """Display current security configuration settings."""
+        allow_vpc_cidr = os.environ.get('ELASTICACHE_ALLOW_VPC_CIDR', 'false').lower() == 'true'
+
+        print(f"\n🔒 Security Configuration:")
+        print(f"   Access Mode: {'VPC-wide' if allow_vpc_cidr else 'Security Group only (recommended)'}")
+
+        if allow_vpc_cidr:
+            print(f"   ⚠️  VPC CIDR access enabled - any instance in VPC can connect")
+            print(f"   📍 Environment: ELASTICACHE_ALLOW_VPC_CIDR=true")
+        else:
+            print(f"   ✅ Least privilege - only specific security groups allowed")
+            print(f"   📍 Environment: ELASTICACHE_ALLOW_VPC_CIDR=false (default)")
+            print(f"   💡 To enable VPC-wide access: export ELASTICACHE_ALLOW_VPC_CIDR=true")
+
     def provision_elasticache(self, config=None, interactive=True):
         """Main method to provision ElastiCache with proper configuration."""
         print("🚀 Starting ElastiCache Redis provisioning...")
@@ -668,6 +739,9 @@ class ElastiCacheProvisioner:
         cost_info = get_cost_estimate(config['node_type'])
         if cost_info:
             print(f"   Estimated Monthly Cost: ${cost_info['monthly']:.2f}")
+
+        # Display security configuration
+        self.display_security_configuration()
 
         # Confirm before proceeding
         if interactive:
