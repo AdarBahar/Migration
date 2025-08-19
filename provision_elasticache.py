@@ -541,32 +541,148 @@ class ElastiCacheProvisioner:
             print(f"⚠️  Could not get subnet IDs from group: {e}")
             return []
 
+    def get_provisioning_progress_info(self, cache_name, is_serverless=True):
+        """Get detailed provisioning progress information."""
+        progress_info = {
+            'status': 'unknown',
+            'progress_steps': [],
+            'estimated_remaining': 'unknown'
+        }
+
+        try:
+            if is_serverless:
+                response = self.elasticache_client.describe_serverless_caches(
+                    ServerlessCacheName=cache_name
+                )
+                cache = response['ServerlessCaches'][0]
+                status = cache['Status']
+                progress_info['status'] = status
+
+                # Serverless cache provisioning steps
+                if status == 'creating':
+                    progress_info['progress_steps'] = [
+                        "🔧 Allocating serverless compute resources",
+                        "🌐 Configuring network interfaces",
+                        "🔒 Applying security group rules",
+                        "⚙️  Initializing Redis engine",
+                        "🔗 Setting up endpoint connectivity"
+                    ]
+                    progress_info['estimated_remaining'] = "3-5 minutes"
+
+            else:
+                response = self.elasticache_client.describe_cache_clusters(
+                    CacheClusterId=cache_name,
+                    ShowCacheNodeInfo=True
+                )
+                cluster = response['CacheClusters'][0]
+                status = cluster['CacheClusterStatus']
+                progress_info['status'] = status
+
+                # Traditional cluster provisioning steps
+                if status == 'creating':
+                    # Get more detailed info about nodes
+                    cache_nodes = cluster.get('CacheNodes', [])
+                    node_statuses = [node.get('CacheNodeStatus', 'unknown') for node in cache_nodes]
+
+                    progress_info['progress_steps'] = [
+                        "🖥️  Launching EC2 instances for cache nodes",
+                        "🌐 Configuring VPC networking and subnets",
+                        "🔒 Applying security group rules",
+                        "💾 Attaching EBS volumes for persistence",
+                        "⚙️  Installing and configuring Redis",
+                        "🔗 Setting up cluster endpoints",
+                        "🏥 Configuring health checks"
+                    ]
+
+                    if cache_nodes:
+                        available_nodes = sum(1 for status in node_statuses if status == 'available')
+                        total_nodes = len(cache_nodes)
+                        progress_info['progress_steps'].append(
+                            f"📊 Cache nodes: {available_nodes}/{total_nodes} ready"
+                        )
+
+                    progress_info['estimated_remaining'] = "5-10 minutes"
+
+        except Exception as e:
+            progress_info['error'] = str(e)
+
+        return progress_info
+
     def wait_for_cache_available(self, cache_name, is_serverless=True, timeout_minutes=15):
-        """Wait for ElastiCache (serverless or cluster) to become available."""
+        """Wait for ElastiCache (serverless or cluster) to become available with detailed progress."""
         cache_type = "serverless cache" if is_serverless else "cluster"
         print(f"⏳ Waiting for {cache_type} {cache_name} to become available...")
         print(f"⏱️  Timeout: {timeout_minutes} minutes")
+        print(f"")
 
         start_time = time.time()
         timeout_seconds = timeout_minutes * 60
+        last_status = None
+        check_count = 0
+
+        # Show initial provisioning steps
+        print(f"🚀 ElastiCache Provisioning Steps:")
+        if is_serverless:
+            initial_steps = [
+                "1️⃣  Creating serverless cache configuration",
+                "2️⃣  Allocating compute resources",
+                "3️⃣  Configuring network and security",
+                "4️⃣  Initializing Redis engine",
+                "5️⃣  Setting up endpoints"
+            ]
+        else:
+            initial_steps = [
+                "1️⃣  Creating cache cluster configuration",
+                "2️⃣  Launching EC2 instances",
+                "3️⃣  Configuring VPC networking",
+                "4️⃣  Installing Redis software",
+                "5️⃣  Setting up cluster endpoints",
+                "6️⃣  Running health checks"
+            ]
+
+        for step in initial_steps:
+            print(f"   {step}")
+        print(f"")
 
         while time.time() - start_time < timeout_seconds:
             try:
+                check_count += 1
+                elapsed_minutes = (time.time() - start_time) / 60
+
+                # Get detailed progress information
+                progress_info = self.get_provisioning_progress_info(cache_name, is_serverless)
+                status = progress_info['status']
+
+                # Show status update with timing
+                if status != last_status or check_count % 3 == 1:  # Show every 3rd check or status change
+                    print(f"📊 [{elapsed_minutes:.1f}min] Status: {status}")
+
+                    if status == 'creating':
+                        estimated = progress_info.get('estimated_remaining', 'unknown')
+                        print(f"   ⏱️  Estimated remaining: {estimated}")
+
+                        # Show current provisioning steps
+                        steps = progress_info.get('progress_steps', [])
+                        if steps:
+                            print(f"   🔄 Current activities:")
+                            for step in steps[:3]:  # Show first 3 steps to avoid clutter
+                                print(f"      {step}")
+                            if len(steps) > 3:
+                                print(f"      ... and {len(steps) - 3} more steps")
+
+                    print(f"")
+                    last_status = status
+
                 if is_serverless:
-                    # Check serverless cache status
-                    response = self.elasticache_client.describe_serverless_caches(
-                        ServerlessCacheName=cache_name
-                    )
-
-                    cache = response['ServerlessCaches'][0]
-                    status = cache['Status']
-
-                    print(f"📊 Serverless cache status: {status}")
-
                     if status == 'available':
+                        response = self.elasticache_client.describe_serverless_caches(
+                            ServerlessCacheName=cache_name
+                        )
+                        cache = response['ServerlessCaches'][0]
                         endpoint = cache['Endpoint']
                         print(f"✅ Serverless cache is available!")
                         print(f"📍 Endpoint: {endpoint['Address']}:{endpoint['Port']}")
+                        print(f"⏱️  Total provisioning time: {elapsed_minutes:.1f} minutes")
                         return {
                             'endpoint': endpoint['Address'],
                             'port': endpoint['Port'],
@@ -577,21 +693,16 @@ class ElastiCacheProvisioner:
                         print(f"❌ Serverless cache creation failed with status: {status}")
                         return None
                 else:
-                    # Check traditional cluster status
-                    response = self.elasticache_client.describe_cache_clusters(
-                        CacheClusterId=cache_name,
-                        ShowCacheNodeInfo=True
-                    )
-
-                    cluster = response['CacheClusters'][0]
-                    status = cluster['CacheClusterStatus']
-
-                    print(f"📊 Cluster status: {status}")
-
                     if status == 'available':
+                        response = self.elasticache_client.describe_cache_clusters(
+                            CacheClusterId=cache_name,
+                            ShowCacheNodeInfo=True
+                        )
+                        cluster = response['CacheClusters'][0]
                         endpoint = cluster['CacheNodes'][0]['Endpoint']
                         print(f"✅ Cluster is available!")
                         print(f"📍 Endpoint: {endpoint['Address']}:{endpoint['Port']}")
+                        print(f"⏱️  Total provisioning time: {elapsed_minutes:.1f} minutes")
                         return {
                             'endpoint': endpoint['Address'],
                             'port': endpoint['Port'],
@@ -608,7 +719,7 @@ class ElastiCacheProvisioner:
                 print(f"⚠️  Error checking {cache_type} status: {e}")
                 time.sleep(30)
 
-        print(f"⏰ Timeout waiting for {cache_type} to become available")
+        print(f"⏰ Timeout waiting for {cache_type} to become available after {timeout_minutes} minutes")
         return None
 
     def generate_env_config(self, cache_info, cache_name):
@@ -787,7 +898,20 @@ class ElastiCacheProvisioner:
                 print("❌ Provisioning cancelled by user")
                 return False
 
+        # Show overall provisioning steps
+        print(f"\n🗺️  Provisioning Overview:")
+        print(f"   1️⃣  Detect EC2 instance and VPC configuration")
+        print(f"   2️⃣  Discover VPC subnets for ElastiCache placement")
+        print(f"   3️⃣  Create security group with appropriate access rules")
+        print(f"   4️⃣  Create subnet group for multi-AZ deployment")
+        print(f"   5️⃣  Provision ElastiCache instance (serverless or cluster)")
+        print(f"   6️⃣  Wait for ElastiCache to become available")
+        print(f"   7️⃣  Verify network connectivity")
+        print(f"   8️⃣  Generate configuration files")
+        print(f"")
+
         # Step 1: Get current instance information
+        print(f"1️⃣  Detecting EC2 instance and VPC configuration...")
         instance_info = self.get_current_instance_info()
 
         if not instance_info:
@@ -813,28 +937,36 @@ class ElastiCacheProvisioner:
 
         vpc_id = instance_info['vpc_id']
         source_security_groups = instance_info['security_groups']
+        print(f"   ✅ Found VPC: {vpc_id}")
+        print(f"   ✅ Found security groups: {source_security_groups}")
 
         # Step 2: Get VPC subnets
+        print(f"\n2️⃣  Discovering VPC subnets for ElastiCache placement...")
         subnets = self.get_vpc_subnets(vpc_id)
         if not subnets:
             print("❌ No available subnets found in VPC")
             return False
+        print(f"   ✅ Found {len(subnets)} available subnets")
 
         # Step 3: Create security group
-        print("\n📋 Creating security group...")
+        print(f"\n3️⃣  Creating security group with appropriate access rules...")
         security_group_id = self.create_security_group(vpc_id, source_security_groups)
         if not security_group_id:
             return False
+        print(f"   ✅ Security group created: {security_group_id}")
 
         # Step 4: Create subnet group
-        print("\n📋 Creating subnet group...")
+        print(f"\n4️⃣  Creating subnet group for multi-AZ deployment...")
         subnet_group_name = self.create_subnet_group(vpc_id, subnets)
         if not subnet_group_name:
             return False
+        print(f"   ✅ Subnet group created: {subnet_group_name}")
 
         # Step 5: Create ElastiCache (Serverless by default)
         cache_name = "Source-ElastiCache"
-        print(f"\n📋 Creating ElastiCache...")
+        print(f"\n5️⃣  Provisioning ElastiCache instance (this may take several minutes)...")
+        print(f"   📍 Cache name: {cache_name}")
+        print(f"   📍 Type: Serverless (with cluster fallback)")
 
         # Try serverless first, fallback to cluster if needed
         created_cache_result = self.create_elasticache_serverless(
@@ -851,24 +983,28 @@ class ElastiCacheProvisioner:
         cache_type = created_cache_result['type']
         is_serverless = cache_type == 'serverless'
 
-        print(f"📋 Created cache: {created_cache_name} (Type: {cache_type})")
+        print(f"   ✅ Cache creation initiated: {created_cache_name} (Type: {cache_type})")
 
         # Step 6: Wait for cache to be available
-        print(f"\n📋 Waiting for cache to become available...")
+        print(f"\n6️⃣  Waiting for ElastiCache to become available...")
+        print(f"   📍 This is typically the longest step (5-15 minutes)")
+        print(f"   📍 You'll see detailed progress updates below")
         cache_info = self.wait_for_cache_available(created_cache_name, is_serverless)
         if not cache_info:
             print("❌ Cache did not become available within timeout period")
             return False
 
         # Step 7: Verify network connectivity
-        print(f"\n📋 Verifying network connectivity...")
+        print(f"\n7️⃣  Verifying network connectivity...")
         connectivity_ok = self.verify_network_connectivity(cache_info)
         if not connectivity_ok:
             print("⚠️  Network connectivity test failed, but continuing...")
             print("💡 You may need to check security groups and network ACLs manually")
+        else:
+            print(f"   ✅ Network connectivity verified successfully")
 
         # Step 8: Generate configuration
-        print(f"\n📋 Generating configuration...")
+        print(f"\n8️⃣  Generating configuration files...")
         env_config = self.generate_env_config(cache_info, created_cache_name)
 
         # Save to file
@@ -878,6 +1014,10 @@ class ElastiCacheProvisioner:
 
         # Save cache info
         info_filename = self.save_cache_info(created_cache_name, cache_info, security_group_id, subnet_group_name)
+
+        print(f"   ✅ Configuration files generated:")
+        print(f"      📄 {env_filename}")
+        print(f"      📄 {info_filename}")
 
         # Step 9: Display success information
         cache_type_display = "Serverless Cache" if cache_info.get('type') == 'serverless' else "Redis Cluster"
