@@ -104,8 +104,14 @@ main() {
     # Step 6: Create .env file if it doesn't exist
     print_step "Step 6: Checking environment configuration..."
     if [[ ! -f ".env" ]]; then
-        print_info "Creating initial .env file..."
-        cat > .env << 'EOF'
+        if [[ -f ".env.example" ]]; then
+            print_info "Creating .env file from .env.example template..."
+            cp .env.example .env
+            print_status "Initial .env file created from template"
+            print_warning "Please edit .env file with your actual Redis connection details"
+        else
+            print_info "Creating basic .env file..."
+            cat > .env << 'EOF'
 # Redis Migration Configuration
 # Created by Start script
 
@@ -129,7 +135,8 @@ REDIS_DEST_DB=0
 REDIS_TIMEOUT=5
 LOG_LEVEL=INFO
 EOF
-        print_status "Initial .env file created"
+            print_status "Basic .env file created"
+        fi
     else
         print_status ".env file already exists"
     fi
