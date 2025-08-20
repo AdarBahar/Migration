@@ -1,6 +1,6 @@
 
 AWSTemplateFormatVersion: '2010-09-09'
-Description: Provision an EC2 instance for the Migration project with Python and Git pre-configured.
+Description: 'Redis Migration Tool - EC2 instance with pre-configured environment for Redis database migration operations (Auto-deployed via GitHub Actions)'
 
 Metadata:
   AWS::CloudFormation::Interface:
