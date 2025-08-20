@@ -1,6 +1,8 @@
 import os
 import redis
 import ssl
+import json
+from datetime import datetime
 from dotenv import load_dotenv, set_key
 from getpass import getpass
 
@@ -109,6 +111,192 @@ def test_redis_connection(prefix):
     except Exception as e:
         print(f"❌ Connection to {name} failed: {e}\n")
 
+def export_configuration():
+    """Export current Redis configuration to a JSON file."""
+    print("\n📤 Export Redis Configuration")
+    print("=" * 40)
+
+    # Get current configuration
+    config = {
+        "metadata": {
+            "exported_at": datetime.now().isoformat(),
+            "exported_by": "Redis Migration Tool",
+            "version": "1.0"
+        },
+        "source": {
+            "name": os.getenv("REDIS_SOURCE_NAME", ""),
+            "host": os.getenv("REDIS_SOURCE_HOST", ""),
+            "port": os.getenv("REDIS_SOURCE_PORT", "6379"),
+            "tls": os.getenv("REDIS_SOURCE_TLS", "false"),
+            "db": os.getenv("REDIS_SOURCE_DB", "0")
+        },
+        "destination": {
+            "name": os.getenv("REDIS_DEST_NAME", ""),
+            "host": os.getenv("REDIS_DEST_HOST", ""),
+            "port": os.getenv("REDIS_DEST_PORT", "6379"),
+            "tls": os.getenv("REDIS_DEST_TLS", "false"),
+            "db": os.getenv("REDIS_DEST_DB", "0")
+        },
+        "settings": {
+            "timeout": os.getenv("REDIS_TIMEOUT", "5"),
+            "log_level": os.getenv("LOG_LEVEL", "INFO")
+        }
+    }
+
+    # Check if there's any configuration to export
+    if not config["source"]["host"] and not config["destination"]["host"]:
+        print("⚠️  No Redis configuration found to export.")
+        print("   Please configure at least one Redis connection first.")
+        return
+
+    # Generate default filename
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    default_filename = f"redis_config_{timestamp}.json"
+
+    # Get filename from user
+    filename = input(f"Export filename [{default_filename}]: ").strip()
+    if not filename:
+        filename = default_filename
+
+    # Ensure .json extension
+    if not filename.endswith('.json'):
+        filename += '.json'
+
+    try:
+        # Write configuration to file
+        with open(filename, 'w') as f:
+            json.dump(config, f, indent=2)
+
+        print(f"✅ Configuration exported to: {filename}")
+        print(f"📁 File size: {os.path.getsize(filename)} bytes")
+        print()
+        print("📋 Exported configuration includes:")
+        if config["source"]["host"]:
+            print(f"   🔗 Source: {config['source']['name']} ({config['source']['host']})")
+        if config["destination"]["host"]:
+            print(f"   🔗 Destination: {config['destination']['name']} ({config['destination']['host']})")
+        print("   ⚠️  Note: Passwords are NOT exported for security reasons")
+        print()
+
+    except Exception as e:
+        print(f"❌ Failed to export configuration: {e}")
+
+def import_configuration():
+    """Import Redis configuration from a JSON file."""
+    print("\n📥 Import Redis Configuration")
+    print("=" * 40)
+
+    # List available JSON files
+    json_files = [f for f in os.listdir('.') if f.endswith('.json') and f.startswith('redis_config')]
+
+    if json_files:
+        print("📁 Available configuration files:")
+        for i, file in enumerate(json_files, 1):
+            try:
+                stat = os.stat(file)
+                size = stat.st_size
+                mtime = datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M")
+                print(f"   {i}. {file} ({size} bytes, modified: {mtime})")
+            except:
+                print(f"   {i}. {file}")
+        print()
+
+    # Get filename from user
+    filename = input("Import filename (or press Enter to browse): ").strip()
+
+    if not filename:
+        if json_files:
+            try:
+                choice = input(f"Select file [1-{len(json_files)}]: ").strip()
+                if choice.isdigit() and 1 <= int(choice) <= len(json_files):
+                    filename = json_files[int(choice) - 1]
+                else:
+                    print("❌ Invalid selection.")
+                    return
+            except:
+                print("❌ Invalid selection.")
+                return
+        else:
+            print("❌ No configuration files found.")
+            return
+
+    # Ensure .json extension
+    if not filename.endswith('.json'):
+        filename += '.json'
+
+    # Check if file exists
+    if not os.path.exists(filename):
+        print(f"❌ File not found: {filename}")
+        return
+
+    try:
+        # Read configuration from file
+        with open(filename, 'r') as f:
+            config = json.load(f)
+
+        # Validate configuration structure
+        if not isinstance(config, dict) or 'source' not in config or 'destination' not in config:
+            print("❌ Invalid configuration file format.")
+            return
+
+        print(f"✅ Configuration loaded from: {filename}")
+
+        # Show what will be imported
+        print("\n📋 Configuration to import:")
+        if config.get('metadata', {}).get('exported_at'):
+            print(f"   📅 Exported: {config['metadata']['exported_at']}")
+
+        source = config.get('source', {})
+        dest = config.get('destination', {})
+
+        if source.get('host'):
+            print(f"   🔗 Source: {source.get('name', 'Unnamed')} ({source.get('host')}:{source.get('port', '6379')})")
+        if dest.get('host'):
+            print(f"   🔗 Destination: {dest.get('name', 'Unnamed')} ({dest.get('host')}:{dest.get('port', '6379')})")
+
+        # Confirm import
+        print("\n⚠️  This will overwrite your current configuration!")
+        confirm = input("Continue with import? (y/N): ").strip().lower()
+
+        if confirm != 'y':
+            print("❌ Import cancelled.")
+            return
+
+        # Import source configuration
+        if source.get('host'):
+            set_key(ENV_PATH, "REDIS_SOURCE_NAME", source.get('name', ''))
+            set_key(ENV_PATH, "REDIS_SOURCE_HOST", source.get('host', ''))
+            set_key(ENV_PATH, "REDIS_SOURCE_PORT", source.get('port', '6379'))
+            set_key(ENV_PATH, "REDIS_SOURCE_TLS", source.get('tls', 'false'))
+            set_key(ENV_PATH, "REDIS_SOURCE_DB", source.get('db', '0'))
+
+        # Import destination configuration
+        if dest.get('host'):
+            set_key(ENV_PATH, "REDIS_DEST_NAME", dest.get('name', ''))
+            set_key(ENV_PATH, "REDIS_DEST_HOST", dest.get('host', ''))
+            set_key(ENV_PATH, "REDIS_DEST_PORT", dest.get('port', '6379'))
+            set_key(ENV_PATH, "REDIS_DEST_TLS", dest.get('tls', 'false'))
+            set_key(ENV_PATH, "REDIS_DEST_DB", dest.get('db', '0'))
+
+        # Import settings
+        settings = config.get('settings', {})
+        if settings.get('timeout'):
+            set_key(ENV_PATH, "REDIS_TIMEOUT", settings.get('timeout', '5'))
+        if settings.get('log_level'):
+            set_key(ENV_PATH, "LOG_LEVEL", settings.get('log_level', 'INFO'))
+
+        # Reload environment
+        reload_env()
+
+        print("✅ Configuration imported successfully!")
+        print("⚠️  Remember to set passwords manually for security reasons.")
+        print()
+
+    except json.JSONDecodeError:
+        print("❌ Invalid JSON file format.")
+    except Exception as e:
+        print(f"❌ Failed to import configuration: {e}")
+
 def main():
     print("🔐 Redis Environment Configuration Tool")
 
@@ -119,8 +307,10 @@ def main():
         print("2. Edit Destination Redis")
         print("3. Test Source Redis")
         print("4. Test Destination Redis")
-        print("5. Exit")
-        choice = input("Enter choice [1-5]: ").strip()
+        print("5. Export Configuration")
+        print("6. Import Configuration")
+        print("7. Exit")
+        choice = input("Enter choice [1-7]: ").strip()
 
         if choice == "1":
             setup_connection("REDIS_SOURCE")
@@ -131,6 +321,10 @@ def main():
         elif choice == "4":
             test_redis_connection("REDIS_DEST")
         elif choice == "5":
+            export_configuration()
+        elif choice == "6":
+            import_configuration()
+        elif choice == "7":
             print("✅ Exiting config tool.")
             break
         else:

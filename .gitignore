@@ -18,6 +18,9 @@ Thumbs.db
 .env.local
 .env.*.local
 
+# Ignore exported Redis configurations (may contain sensitive data)
+redis_config_*.json
+
 # Ignore IDE/editor-specific files
 .vscode/
 .idea/
