@@ -381,6 +381,32 @@ timestamp,redis_name,redis_host,operation,latency_ms,key_count,error_message
 
 ---
 
+## 📚 Documentation
+
+### 🎯 **Getting Started**
+- **[WALKTHROUGH.md](Help_docs/WALKTHROUGH.md)** - Complete step-by-step guide from deployment to migration testing
+- **[migration-instance.md](Help_docs/migration-instance.md)** - Detailed CloudFormation deployment guide and manual setup
+
+### 🔧 **Technical Documentation**
+- **[ELASTICACHE_README.md](Help_docs/ELASTICACHE_README.md)** - Comprehensive ElastiCache provisioning and configuration guide
+- **[OUT_OF_THE_BOX_FEATURES.md](Help_docs/OUT_OF_THE_BOX_FEATURES.md)** - Complete feature overview and capabilities
+- **[TROUBLESHOOTING.md](Help_docs/TROUBLESHOOTING.md)** - Problem resolution and debugging guide
+
+### 🔒 **Security & Organization**
+- **[SECURITY.md](Help_docs/SECURITY.md)** - Security guidelines, best practices, and compliance information
+- **[DOCUMENTATION_INDEX.md](Help_docs/DOCUMENTATION_INDEX.md)** - Complete documentation navigation and organization
+
+### 📖 **Quick Reference**
+| Document | Purpose | When to Use |
+|----------|---------|-------------|
+| [WALKTHROUGH.md](Help_docs/WALKTHROUGH.md) | Complete setup guide | First-time users, step-by-step deployment |
+| [ELASTICACHE_README.md](Help_docs/ELASTICACHE_README.md) | ElastiCache details | ElastiCache provisioning and troubleshooting |
+| [TROUBLESHOOTING.md](Help_docs/TROUBLESHOOTING.md) | Problem solving | When encountering issues or errors |
+| [SECURITY.md](Help_docs/SECURITY.md) | Security practices | Before production deployment |
+| [OUT_OF_THE_BOX_FEATURES.md](Help_docs/OUT_OF_THE_BOX_FEATURES.md) | Feature overview | Understanding tool capabilities |
+
+---
+
 ## ✅ Requirements
 
 Install dependencies:
