@@ -73,9 +73,9 @@ Your CloudFormation template (`migration-instance.yaml`) now includes **ALL** th
 - ✅ **Improved error messages** and troubleshooting
 
 ### **Helper Scripts:**
-- ✅ **`get_region.py`** - IMDSv2-compatible region detection
-- ✅ **`verify_setup.sh`** - Complete environment verification
-- ✅ **`fix_current_instance.sh`** - Retroactive fixes for existing instances
+- ✅ **`scripts/diagnose_instance.sh`** - Comprehensive EC2 instance diagnostics and troubleshooting
+- ✅ **`Start`** - Complete environment initialization and setup
+- ✅ **`index.py`** - Migration Control Center with intelligent workflow management
 
 ## 🌍 **Multi-Region Support:**
 

@@ -396,6 +396,10 @@ timestamp,redis_name,redis_host,operation,latency_ms,key_count,error_message
 - **[SECURITY.md](Help_docs/SECURITY.md)** - Security guidelines, best practices, and compliance information
 - **[DOCUMENTATION_INDEX.md](Help_docs/DOCUMENTATION_INDEX.md)** - Complete documentation navigation and organization
 
+### 🔧 **Scripts & Utilities**
+- **[scripts/README.md](scripts/README.md)** - Shell scripts for troubleshooting and diagnostics
+- **[scripts/diagnose_instance.sh](scripts/diagnose_instance.sh)** - Comprehensive EC2 instance diagnostics
+
 ### 📖 **Quick Reference**
 | Document | Purpose | When to Use |
 |----------|---------|-------------|

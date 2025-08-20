@@ -154,7 +154,7 @@ EOF
     # Step 8: Make scripts executable
     print_step "Step 8: Setting script permissions..."
     chmod +x Start 2>/dev/null || true
-    chmod +x *.sh 2>/dev/null || true
+    chmod +x scripts/*.sh 2>/dev/null || true
     print_status "Script permissions set"
     
     echo ""
