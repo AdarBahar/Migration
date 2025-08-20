@@ -389,6 +389,7 @@ timestamp,redis_name,redis_host,operation,latency_ms,key_count,error_message
 
 ### 🔧 **Technical Documentation**
 - **[ELASTICACHE_README.md](Help_docs/ELASTICACHE_README.md)** - Comprehensive ElastiCache provisioning and configuration guide
+- **[CONFIGURATION_MANAGEMENT.md](Help_docs/CONFIGURATION_MANAGEMENT.md)** - Export/import configurations for quick setup and sharing
 - **[OUT_OF_THE_BOX_FEATURES.md](Help_docs/OUT_OF_THE_BOX_FEATURES.md)** - Complete feature overview and capabilities
 - **[TROUBLESHOOTING.md](Help_docs/TROUBLESHOOTING.md)** - Problem resolution and debugging guide
 
@@ -405,6 +406,7 @@ timestamp,redis_name,redis_host,operation,latency_ms,key_count,error_message
 |----------|---------|-------------|
 | [WALKTHROUGH.md](Help_docs/WALKTHROUGH.md) | Complete setup guide | First-time users, step-by-step deployment |
 | [ELASTICACHE_README.md](Help_docs/ELASTICACHE_README.md) | ElastiCache details | ElastiCache provisioning and troubleshooting |
+| [CONFIGURATION_MANAGEMENT.md](Help_docs/CONFIGURATION_MANAGEMENT.md) | Export/import configs | Quick setup, team sharing, backups |
 | [TROUBLESHOOTING.md](Help_docs/TROUBLESHOOTING.md) | Problem solving | When encountering issues or errors |
 | [SECURITY.md](Help_docs/SECURITY.md) | Security practices | Before production deployment |
 | [OUT_OF_THE_BOX_FEATURES.md](Help_docs/OUT_OF_THE_BOX_FEATURES.md) | Feature overview | Understanding tool capabilities |
