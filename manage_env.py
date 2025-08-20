@@ -2,6 +2,7 @@ import os
 import redis
 import ssl
 import json
+import re
 from datetime import datetime
 from dotenv import load_dotenv, set_key
 from getpass import getpass
@@ -62,6 +63,106 @@ def setup_connection(label_prefix):
     tls_value = "true" if tls == "y" else "false"
     set_key(ENV_PATH, f"{label_prefix.upper()}_TLS", tls_value)
     reload_env()
+
+def parse_redis_url(redis_url):
+    """Parse Redis URL and extract connection parameters.
+
+    Supports formats:
+    - redis://[user]:[password]@[host]:[port]
+    - rediss://[user]:[password]@[host]:[port] (TLS enabled)
+
+    Returns dict with parsed parameters or None if invalid.
+    """
+    # Redis URL pattern
+    pattern = r'^(redis|rediss)://(?:([^:]+):([^@]+)@)?([^:]+):(\d+)/?$'
+
+    match = re.match(pattern, redis_url.strip())
+    if not match:
+        return None
+
+    scheme, user, password, host, port = match.groups()
+
+    # Determine TLS based on scheme
+    tls = scheme == "rediss"
+
+    # Default user if not specified
+    if user is None:
+        user = "default"
+
+    return {
+        "host": host,
+        "port": port,
+        "user": user,
+        "password": password or "",
+        "tls": tls
+    }
+
+def setup_destination_connection():
+    """Simplified destination Redis setup using Redis Cloud URL."""
+    print(f"\n🔧 Configuring Destination Redis (Redis Cloud)")
+    print("=" * 50)
+
+    # Get friendly name
+    prompt_env("REDIS_DEST_NAME", "Name (friendly label)", max_length=50)
+
+    # Instructions for getting Redis Cloud URL
+    print("\n📋 Redis Cloud Connection URL Instructions:")
+    print("1. Go to Redis Cloud > Your database")
+    print("2. Click 'Connect to database'")
+    print("3. Select 'Redis CLI' tab")
+    print("4. Click 'Unmask the password'")
+    print("5. Copy the connection URL")
+    print()
+    print("💡 Expected format:")
+    print("   redis://default:<password>@redis-12850.c278.us-east-1-4.ec2.redns.redis-cloud.com:12850")
+    print("   rediss://default:<password>@redis-12850.c278.us-east-1-4.ec2.redns.redis-cloud.com:12850")
+    print()
+
+    while True:
+        redis_url = input("🔗 Redis Cloud Connection URL: ").strip()
+
+        if not redis_url:
+            print("❌ URL cannot be empty. Please enter a valid Redis URL.")
+            continue
+
+        # Parse the URL
+        parsed = parse_redis_url(redis_url)
+
+        if not parsed:
+            print("❌ Invalid Redis URL format.")
+            print("💡 Expected format: redis://[user]:[password]@[host]:[port]")
+            print("💡 Or with TLS: rediss://[user]:[password]@[host]:[port]")
+            continue
+
+        # Show parsed information for confirmation
+        print(f"\n✅ Successfully parsed Redis URL:")
+        print(f"   🏠 Host: {parsed['host']}")
+        print(f"   🔌 Port: {parsed['port']}")
+        print(f"   👤 User: {parsed['user']}")
+        print(f"   🔒 Password: {'***' + parsed['password'][-4:] if len(parsed['password']) > 4 else '***'}")
+        print(f"   🔐 TLS: {'Enabled' if parsed['tls'] else 'Disabled'}")
+        print()
+
+        confirm = input("Is this information correct? (y/n): ").strip().lower()
+        if confirm == 'y':
+            break
+        else:
+            print("Please enter the URL again.")
+
+    # Set the parsed values in environment
+    set_key(ENV_PATH, "REDIS_DEST_HOST", parsed['host'])
+    set_key(ENV_PATH, "REDIS_DEST_PORT", parsed['port'])
+    set_key(ENV_PATH, "REDIS_DEST_PASSWORD", parsed['password'])
+    set_key(ENV_PATH, "REDIS_DEST_TLS", "true" if parsed['tls'] else "false")
+
+    # Set default database if not already set
+    if not os.getenv("REDIS_DEST_DB"):
+        set_key(ENV_PATH, "REDIS_DEST_DB", "0")
+
+    reload_env()
+
+    print("✅ Destination Redis configuration updated successfully!")
+    print("💡 You can test the connection using option 4 from the main menu.")
 
 def show_current_config():
     print("\n📄 Current Redis Configuration:")
@@ -304,7 +405,7 @@ def main():
         show_current_config()
         print("Choose an option:")
         print("1. Edit Source Redis")
-        print("2. Edit Destination Redis")
+        print("2. Edit Destination Redis (Redis Cloud)")
         print("3. Test Source Redis")
         print("4. Test Destination Redis")
         print("5. Export Configuration")
@@ -315,7 +416,7 @@ def main():
         if choice == "1":
             setup_connection("REDIS_SOURCE")
         elif choice == "2":
-            setup_connection("REDIS_DEST")
+            setup_destination_connection()
         elif choice == "3":
             test_redis_connection("REDIS_SOURCE")
         elif choice == "4":
