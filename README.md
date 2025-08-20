@@ -126,6 +126,18 @@ Install required dependencies:
 pip install -r requirements.txt
 ```
 
+## 🚀 **Automatic CloudFormation Deployment**
+
+The repository includes GitHub Actions that automatically deploy the CloudFormation template to S3 whenever `migration-instance.yaml` is updated:
+
+- ✅ **Automatic S3 Upload**: Template uploaded to S3 on every change
+- ✅ **Template Validation**: CloudFormation syntax validated before deployment
+- ✅ **One-Click Deploy URLs**: Generated automatically for easy deployment
+- ✅ **Deployment Tracking**: Timestamped logs for audit trail
+- ✅ **Public Access**: Templates available via public S3 URLs
+
+**Setup**: See [GITHUB_S3_DEPLOYMENT.md](Help_docs/GITHUB_S3_DEPLOYMENT.md) for configuration instructions.
+
 ---
 
 - 🔍 Compare two Redis databases
@@ -400,6 +412,11 @@ timestamp,redis_name,redis_host,operation,latency_ms,key_count,error_message
 ### 🔧 **Scripts & Utilities**
 - **[scripts/README.md](scripts/README.md)** - Shell scripts for troubleshooting and diagnostics
 - **[scripts/diagnose_instance.sh](scripts/diagnose_instance.sh)** - Comprehensive EC2 instance diagnostics
+- **[scripts/setup-s3-deployment.sh](scripts/setup-s3-deployment.sh)** - Automated S3 deployment setup for CloudFormation
+
+### 🚀 **Deployment & Automation**
+- **[GITHUB_S3_DEPLOYMENT.md](Help_docs/GITHUB_S3_DEPLOYMENT.md)** - Automatic S3 deployment setup for CloudFormation templates
+- **[DEPLOYMENT_TROUBLESHOOTING.md](Help_docs/DEPLOYMENT_TROUBLESHOOTING.md)** - Deployment issue resolution guide
 
 ### 📖 **Quick Reference**
 | Document | Purpose | When to Use |

@@ -1,0 +1,141 @@
+name: 🚀 Deploy CloudFormation Template to S3
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'migration-instance.yaml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'migration-instance.yaml'
+
+env:
+  S3_BUCKET: ${{ secrets.S3_BUCKET_NAME }}
+  AWS_REGION: ${{ secrets.AWS_REGION || 'us-east-1' }}
+
+jobs:
+  deploy-template:
+    name: 📤 Deploy CloudFormation Template
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: 📥 Checkout Repository
+      uses: actions/checkout@v4
+      
+    - name: 🔧 Configure AWS Credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+        
+    - name: ✅ Validate CloudFormation Template
+      run: |
+        echo "🔍 Validating CloudFormation template..."
+        aws cloudformation validate-template \
+          --template-body file://migration-instance.yaml \
+          --region ${{ env.AWS_REGION }}
+        echo "✅ Template validation successful!"
+        
+    - name: 📊 Template Information
+      run: |
+        echo "📋 CloudFormation Template Details:"
+        echo "  📁 File: migration-instance.yaml"
+        echo "  📏 Size: $(stat -c%s migration-instance.yaml) bytes"
+        echo "  🕒 Modified: $(stat -c%y migration-instance.yaml)"
+        echo "  🔗 Target S3: s3://${{ env.S3_BUCKET }}/migration-instance.yaml"
+        echo "  🌍 Region: ${{ env.AWS_REGION }}"
+        
+    - name: 📤 Upload to S3
+      run: |
+        echo "🚀 Uploading CloudFormation template to S3..."
+        
+        # Upload the template with metadata
+        aws s3 cp migration-instance.yaml \
+          s3://${{ env.S3_BUCKET }}/migration-instance.yaml \
+          --metadata "version=${{ github.sha }},updated=$(date -u +%Y-%m-%dT%H:%M:%SZ),branch=${{ github.ref_name }}" \
+          --content-type "text/yaml" \
+          --cache-control "no-cache" \
+          --region ${{ env.AWS_REGION }}
+          
+        echo "✅ Template uploaded successfully!"
+        
+    - name: 🔗 Generate Public URL
+      run: |
+        echo "📍 CloudFormation Template URLs:"
+        echo ""
+        echo "🌐 Public S3 URL:"
+        echo "   https://${{ env.S3_BUCKET }}.s3.${{ env.AWS_REGION }}.amazonaws.com/migration-instance.yaml"
+        echo ""
+        echo "🚀 One-Click Deploy URL:"
+        TEMPLATE_URL="https://${{ env.S3_BUCKET }}.s3.${{ env.AWS_REGION }}.amazonaws.com/migration-instance.yaml"
+        ENCODED_URL=$(echo "$TEMPLATE_URL" | sed 's/:/%3A/g; s/\//%2F/g')
+        echo "   https://console.aws.amazon.com/cloudformation/home?region=${{ env.AWS_REGION }}#/stacks/create/review?templateURL=$ENCODED_URL&stackName=Redis-Migration-Stack"
+        echo ""
+        
+    - name: 📝 Update Deployment Log
+      run: |
+        echo "📝 Creating deployment log..."
+        cat > deployment-log.json << EOF
+        {
+          "deployment": {
+            "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "commit_sha": "${{ github.sha }}",
+            "commit_message": "${{ github.event.head_commit.message }}",
+            "branch": "${{ github.ref_name }}",
+            "actor": "${{ github.actor }}",
+            "s3_bucket": "${{ env.S3_BUCKET }}",
+            "aws_region": "${{ env.AWS_REGION }}",
+            "template_size": $(stat -c%s migration-instance.yaml),
+            "public_url": "https://${{ env.S3_BUCKET }}.s3.${{ env.AWS_REGION }}.amazonaws.com/migration-instance.yaml"
+          }
+        }
+        EOF
+        
+        # Upload deployment log
+        aws s3 cp deployment-log.json \
+          s3://${{ env.S3_BUCKET }}/deployment-logs/$(date +%Y%m%d-%H%M%S)-${{ github.sha }}.json \
+          --content-type "application/json" \
+          --region ${{ env.AWS_REGION }}
+          
+        echo "✅ Deployment log saved to S3"
+        
+    - name: 🎉 Deployment Summary
+      run: |
+        echo "🎉 Deployment Complete!"
+        echo "================================"
+        echo "✅ CloudFormation template validated"
+        echo "✅ Template uploaded to S3"
+        echo "✅ Deployment log created"
+        echo "✅ Public URLs generated"
+        echo ""
+        echo "📋 Next Steps:"
+        echo "1. Use the One-Click Deploy URL to launch the stack"
+        echo "2. Or reference the S3 URL in your CloudFormation deployments"
+        echo "3. Check deployment logs in S3 for detailed information"
+
+  notify-on-failure:
+    name: 🚨 Notify on Failure
+    runs-on: ubuntu-latest
+    needs: deploy-template
+    if: failure()
+    
+    steps:
+    - name: 🚨 Deployment Failed
+      run: |
+        echo "🚨 CloudFormation Template Deployment Failed!"
+        echo "=============================================="
+        echo "❌ The migration-instance.yaml deployment to S3 failed"
+        echo "🔍 Please check the workflow logs for details"
+        echo "💡 Common issues:"
+        echo "   • AWS credentials not configured"
+        echo "   • S3 bucket doesn't exist or no permissions"
+        echo "   • CloudFormation template validation failed"
+        echo "   • Network connectivity issues"
+        echo ""
+        echo "🔧 To fix:"
+        echo "1. Check GitHub Secrets: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, S3_BUCKET_NAME"
+        echo "2. Verify S3 bucket exists and has proper permissions"
+        echo "3. Validate CloudFormation template locally"
+        echo "4. Re-run the workflow after fixing issues"

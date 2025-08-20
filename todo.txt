@@ -1,2 +1,0 @@
-2. manage_env.py - export .env file (for copy/download)
-3. start is not working, and "activate-migration" doesn't start start automatically
