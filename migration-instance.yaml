@@ -306,46 +306,44 @@ Resources:
           #!/bin/bash
           cd /home/ubuntu/Migration
           echo "🚀 Migration environment ready!"
-          echo "Available scripts:"
-          echo "  • DB_compare.py - Compare Redis databases"
-          echo "  • ReadWriteOps.py - Performance testing"
-          echo "  • flushDBData.py - Database cleanup"
-          echo "  • manage_env.py - Environment configuration"
-          echo "  • DataFaker.py - Generate test data"
-          echo "  • provision_elasticache.py - Create ElastiCache instances"
-          echo "  • cleanup_elasticache.py - Remove ElastiCache resources"
           echo ""
-          echo "💡 To activate the virtual environment, run:"
-          echo "   source activate-migration"
+          echo "💡 To start the Migration Control Center, run:"
+          echo "   ./Start"
           echo ""
-          echo "🔄 Or manually:"
+          echo "📋 Available operations through Migration Control Center:"
+          echo "  • Provision ElastiCache"
+          echo "  • Configure Environment"
+          echo "  • Generate Test Data"
+          echo "  • Compare Databases"
+          echo "  • Migration Operations"
+          echo "  • Cleanup Resources"
+          echo ""
+          echo "🔄 Or manually activate environment:"
           echo "   cd /home/ubuntu/Migration && source venv/bin/activate"
           EOF
           chmod +x /home/ubuntu/start-migration.sh
           chown ubuntu:ubuntu /home/ubuntu/start-migration.sh
 
-          # Create a proper activation script (not just an alias)
+          # Create a legacy activation script that redirects to Start
           cat > /home/ubuntu/activate-migration << 'EOF'
           #!/bin/bash
-          # This script should be sourced, not executed
-          if [[ "$${BASH_SOURCE[0]}" == "$${0}" ]]; then
-              echo "⚠️  This script should be sourced, not executed directly."
-              echo "💡 Run: source activate-migration"
-              exit 1
-          fi
-
+          echo "🔄 Redirecting to new Migration Control Center..."
+          echo ""
+          echo "⚠️  The activate-migration script has been replaced with the Start script."
+          echo "💡 Please use: cd /home/ubuntu/Migration && ./Start"
+          echo ""
+          echo "🚀 Launching Migration Control Center now..."
           cd /home/ubuntu/Migration
-          source venv/bin/activate
-          echo "✅ Virtual environment activated!"
-          echo "📍 Current directory: $$(pwd)"
-          echo "🐍 Python: $$(which python)"
+          ./Start
           EOF
           chmod +x /home/ubuntu/activate-migration
           chown ubuntu:ubuntu /home/ubuntu/activate-migration
 
-          # Add the activation script to PATH and create alias
+          # Add helpful aliases to bashrc
           echo 'export PATH="/home/ubuntu:$$PATH"' >> /home/ubuntu/.bashrc
-          echo 'alias activate-migration="source /home/ubuntu/activate-migration"' >> /home/ubuntu/.bashrc
+          echo 'alias migration="cd /home/ubuntu/Migration && ./Start"' >> /home/ubuntu/.bashrc
+          echo 'alias start-migration="cd /home/ubuntu/Migration && ./Start"' >> /home/ubuntu/.bashrc
+          echo 'alias activate-migration="/home/ubuntu/activate-migration"' >> /home/ubuntu/.bashrc
 
           # Ensure basic commands are available (fix PATH issues)
           echo 'export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$$PATH"' >> /home/ubuntu/.bashrc
@@ -481,6 +479,15 @@ Resources:
           # All installation completed successfully!
           echo "✅ All installation completed successfully!"
           echo "🎉 Migration environment is ready for use!"
+          echo ""
+          echo "🚀 To get started:"
+          echo "   cd /home/ubuntu/Migration"
+          echo "   ./Start"
+          echo ""
+          echo "💡 Or use convenient aliases:"
+          echo "   migration        # Launches Migration Control Center"
+          echo "   start-migration  # Same as above"
+          echo "   activate-migration  # Legacy redirect to Start"
 
           # Signal CloudFormation that setup is complete
           echo "🔄 Starting CloudFormation signaling process..."
