@@ -561,3 +561,4 @@ Outputs:
       - ssh -i /path/to/${KeyName}.pem ubuntu@${PublicIp}
       - KeyName: !Ref KeyName
         PublicIp: !GetAtt MigrationInstance.PublicIp
+# Test deployment Thu Aug 21 14:41:20 IDT 2025
