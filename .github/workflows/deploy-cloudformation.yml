@@ -61,17 +61,33 @@ jobs:
           
         echo "✅ Template uploaded successfully!"
         
-    - name: 🔗 Generate Public URL
+    - name: 🔗 Generate URLs
       run: |
         echo "📍 CloudFormation Template URLs:"
         echo ""
-        echo "🌐 Public S3 URL:"
-        echo "   https://${{ env.S3_BUCKET }}.s3.${{ env.AWS_REGION }}.amazonaws.com/migration-instance.yaml"
-        echo ""
-        echo "🚀 One-Click Deploy URL:"
-        TEMPLATE_URL="https://${{ env.S3_BUCKET }}.s3.${{ env.AWS_REGION }}.amazonaws.com/migration-instance.yaml"
-        ENCODED_URL=$(echo "$TEMPLATE_URL" | sed 's/:/%3A/g; s/\//%2F/g')
-        echo "   https://console.aws.amazon.com/cloudformation/home?region=${{ env.AWS_REGION }}#/stacks/create/review?templateURL=$ENCODED_URL&stackName=Redis-Migration-Stack"
+
+        # Try to generate public URL first
+        PUBLIC_URL="https://${{ env.S3_BUCKET }}.s3.${{ env.AWS_REGION }}.amazonaws.com/migration-instance.yaml"
+
+        # Test if bucket allows public access
+        if curl -s --head "$PUBLIC_URL" | grep -q "200 OK"; then
+          echo "🌐 Public S3 URL (recommended for CloudFormation):"
+          echo "   $PUBLIC_URL"
+          echo ""
+          echo "🚀 One-Click Deploy URL:"
+          ENCODED_URL=$(echo "$PUBLIC_URL" | sed 's/:/%3A/g; s/\//%2F/g')
+          echo "   https://console.aws.amazon.com/cloudformation/home?region=${{ env.AWS_REGION }}#/stacks/create/review?templateURL=$ENCODED_URL&stackName=Redis-Migration-Stack"
+        else
+          echo "🔒 Bucket is private - generating pre-signed URL (valid for 7 days):"
+          PRESIGNED_URL=$(aws s3 presign s3://${{ env.S3_BUCKET }}/migration-instance.yaml --expires-in 604800 --region ${{ env.AWS_REGION }})
+          echo "   $PRESIGNED_URL"
+          echo ""
+          echo "🚀 One-Click Deploy URL (7-day expiry):"
+          ENCODED_URL=$(echo "$PRESIGNED_URL" | sed 's/:/%3A/g; s/\//%2F/g; s/&/%26/g')
+          echo "   https://console.aws.amazon.com/cloudformation/home?region=${{ env.AWS_REGION }}#/stacks/create/review?templateURL=$ENCODED_URL&stackName=Redis-Migration-Stack"
+          echo ""
+          echo "⚠️  Note: Pre-signed URLs expire after 7 days. For permanent access, consider making the bucket public."
+        fi
         echo ""
         
     - name: 📝 Update Deployment Log

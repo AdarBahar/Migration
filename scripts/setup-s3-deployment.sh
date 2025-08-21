@@ -106,7 +106,17 @@ create_s3_bucket() {
     
     # Configure bucket for public read
     print_info "Configuring bucket for public read access..."
-    
+
+    # First, disable block public access settings
+    print_info "Disabling block public access settings..."
+    aws s3api put-public-access-block \
+        --bucket "$BUCKET_NAME" \
+        --public-access-block-configuration \
+        "BlockPublicAcls=false,IgnorePublicAcls=false,BlockPublicPolicy=false,RestrictPublicBuckets=false"
+
+    # Wait a moment for the setting to take effect
+    sleep 5
+
     cat > bucket-policy.json << EOF
 {
   "Version": "2012-10-17",
@@ -121,10 +131,10 @@ create_s3_bucket() {
   ]
 }
 EOF
-    
+
     aws s3api put-bucket-policy --bucket "$BUCKET_NAME" --policy file://bucket-policy.json
     rm bucket-policy.json
-    
+
     print_status "Bucket configured for public read access"
 }
 
@@ -161,7 +171,8 @@ create_iam_user() {
     {
       "Effect": "Allow",
       "Action": [
-        "s3:ListBucket"
+        "s3:ListBucket",
+        "s3:GetBucketLocation"
       ],
       "Resource": "arn:aws:s3:::$BUCKET_NAME"
     },
