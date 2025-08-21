@@ -3,6 +3,7 @@
 ![Python](https://img.shields.io/badge/python-3.7%2B-blue?logo=python)
 ![Redis](https://img.shields.io/badge/redis-tested-green?logo=redis)
 ![License: MIT](https://img.shields.io/badge/license-MIT-lightgrey.svg)
+[![Deploy CloudFormation](https://github.com/AdarBahar/Migration/actions/workflows/deploy-cloudformation.yml/badge.svg)](https://github.com/AdarBahar/Migration/actions/workflows/deploy-cloudformation.yml)
 
 A collection of Python tools to manage, test, and verify synchronization between two Redis databases.
 
@@ -130,13 +131,65 @@ pip install -r requirements.txt
 
 The repository includes GitHub Actions that automatically deploy the CloudFormation template to S3 whenever `migration-instance.yaml` is updated:
 
-- ✅ **Automatic S3 Upload**: Template uploaded to S3 on every change
+- ✅ **Secure S3 Upload**: Template uploaded to private S3 bucket on every change
 - ✅ **Template Validation**: CloudFormation syntax validated before deployment
-- ✅ **One-Click Deploy URLs**: Generated automatically for easy deployment
-- ✅ **Deployment Tracking**: Timestamped logs for audit trail
-- ✅ **Public Access**: Templates available via public S3 URLs
+- ✅ **Pre-signed URLs**: Secure, time-limited URLs generated automatically (30-day and 24-hour)
+- ✅ **One-Click Deploy**: Direct AWS Console deployment links with embedded pre-signed URLs
+- ✅ **Deployment Tracking**: Timestamped logs with URL expiration tracking
+- ✅ **Enterprise Security**: Private bucket with block public access enabled
 
-**Setup**: See [GITHUB_S3_DEPLOYMENT.md](Help_docs/GITHUB_S3_DEPLOYMENT.md) for configuration instructions.
+### 🔧 **GitHub Actions Workflow**
+
+**Workflow File**: `.github/workflows/deploy-cloudformation.yml`
+
+**Triggers**:
+- Push to `main` branch with changes to `migration-instance.yaml`
+- Pull requests to `main` with changes to `migration-instance.yaml`
+
+**Required GitHub Secrets**:
+- `AWS_ACCESS_KEY_ID` - AWS access key for S3 deployment
+- `AWS_SECRET_ACCESS_KEY` - AWS secret key for S3 deployment
+- `S3_BUCKET_NAME` - Target S3 bucket name
+- `AWS_REGION` - AWS region for S3 bucket
+
+**Workflow Steps**:
+1. 📥 **Checkout Repository** - Downloads latest code
+2. 🔧 **Configure AWS Credentials** - Sets up AWS access
+3. ✅ **Validate Template** - Validates CloudFormation syntax
+4. 📤 **Upload to S3** - Uploads template with metadata
+5. 🔗 **Generate Secure URLs** - Creates pre-signed URLs (30-day & 24-hour)
+6. 📝 **Create Deployment Log** - Logs deployment with expiration tracking
+
+**Generated URLs**:
+- 🔒 **30-day pre-signed URL** - For sharing and long-term access
+- 🕐 **24-hour pre-signed URL** - For immediate deployment
+- 🚀 **One-click deploy URL** - Direct AWS Console deployment link
+
+**Setup**: See [GITHUB_S3_DEPLOYMENT.md](Help_docs/GITHUB_S3_DEPLOYMENT.md) for complete configuration instructions.
+
+### 📊 **Monitoring Deployments**
+
+**View Workflow Runs**:
+1. Go to repository **Actions** tab
+2. Click on **"🚀 Deploy CloudFormation Template to S3"** workflow
+3. View individual runs with detailed logs and generated URLs
+
+**Deployment Logs**: Stored in S3 at `s3://your-bucket/deployment-logs/` with:
+- Commit SHA and message
+- Deployment timestamp
+- Pre-signed URL expiration times
+- Template size and metadata
+
+**Testing the Workflow**:
+```bash
+# Make a small change to trigger deployment
+echo "# Updated $(date)" >> migration-instance.yaml
+git add migration-instance.yaml
+git commit -m "Test automatic S3 deployment"
+git push origin main
+
+# Watch the workflow in GitHub Actions tab
+```
 
 ---
 
@@ -423,6 +476,7 @@ timestamp,redis_name,redis_host,operation,latency_ms,key_count,error_message
 |----------|---------|-------------|
 | [WALKTHROUGH.md](Help_docs/WALKTHROUGH.md) | Complete setup guide | First-time users, step-by-step deployment |
 | [ELASTICACHE_README.md](Help_docs/ELASTICACHE_README.md) | ElastiCache details | ElastiCache provisioning and troubleshooting |
+| [GITHUB_S3_DEPLOYMENT.md](Help_docs/GITHUB_S3_DEPLOYMENT.md) | Automatic S3 deployment | Setting up GitHub Actions for CloudFormation |
 | [CONFIGURATION_MANAGEMENT.md](Help_docs/CONFIGURATION_MANAGEMENT.md) | Export/import configs | Quick setup, team sharing, backups |
 | [TROUBLESHOOTING.md](Help_docs/TROUBLESHOOTING.md) | Problem solving | When encountering issues or errors |
 | [SECURITY.md](Help_docs/SECURITY.md) | Security practices | Before production deployment |
