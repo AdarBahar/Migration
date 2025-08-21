@@ -104,38 +104,18 @@ create_s3_bucket() {
         print_status "S3 bucket created: $BUCKET_NAME"
     fi
     
-    # Configure bucket for public read
-    print_info "Configuring bucket for public read access..."
+    # Configure bucket for secure access with pre-signed URLs
+    print_info "Configuring bucket for secure access (private with pre-signed URLs)..."
 
-    # First, disable block public access settings
-    print_info "Disabling block public access settings..."
+    # Ensure block public access is enabled for security
+    print_info "Enabling block public access settings for security..."
     aws s3api put-public-access-block \
         --bucket "$BUCKET_NAME" \
         --public-access-block-configuration \
-        "BlockPublicAcls=false,IgnorePublicAcls=false,BlockPublicPolicy=false,RestrictPublicBuckets=false"
+        "BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true"
 
-    # Wait a moment for the setting to take effect
-    sleep 5
-
-    cat > bucket-policy.json << EOF
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Sid": "PublicReadGetObject",
-      "Effect": "Allow",
-      "Principal": "*",
-      "Action": "s3:GetObject",
-      "Resource": "arn:aws:s3:::$BUCKET_NAME/*"
-    }
-  ]
-}
-EOF
-
-    aws s3api put-bucket-policy --bucket "$BUCKET_NAME" --policy file://bucket-policy.json
-    rm bucket-policy.json
-
-    print_status "Bucket configured for public read access"
+    print_status "Bucket configured for secure private access"
+    print_info "CloudFormation templates will be accessed via pre-signed URLs"
 }
 
 # Create IAM user and policy

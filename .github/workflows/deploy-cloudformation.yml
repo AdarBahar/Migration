@@ -61,33 +61,35 @@ jobs:
           
         echo "✅ Template uploaded successfully!"
         
-    - name: 🔗 Generate URLs
+    - name: 🔗 Generate Secure URLs
       run: |
-        echo "📍 CloudFormation Template URLs:"
+        echo "📍 CloudFormation Template URLs (Secure Access):"
         echo ""
 
-        # Try to generate public URL first
-        PUBLIC_URL="https://${{ env.S3_BUCKET }}.s3.${{ env.AWS_REGION }}.amazonaws.com/migration-instance.yaml"
+        # Generate pre-signed URL (30 days for longer validity)
+        echo "🔒 Secure Pre-signed URL (valid for 30 days):"
+        PRESIGNED_URL=$(aws s3 presign s3://${{ env.S3_BUCKET }}/migration-instance.yaml --expires-in 2592000 --region ${{ env.AWS_REGION }})
+        echo "   $PRESIGNED_URL"
+        echo ""
 
-        # Test if bucket allows public access
-        if curl -s --head "$PUBLIC_URL" | grep -q "200 OK"; then
-          echo "🌐 Public S3 URL (recommended for CloudFormation):"
-          echo "   $PUBLIC_URL"
-          echo ""
-          echo "🚀 One-Click Deploy URL:"
-          ENCODED_URL=$(echo "$PUBLIC_URL" | sed 's/:/%3A/g; s/\//%2F/g')
-          echo "   https://console.aws.amazon.com/cloudformation/home?region=${{ env.AWS_REGION }}#/stacks/create/review?templateURL=$ENCODED_URL&stackName=Redis-Migration-Stack"
-        else
-          echo "🔒 Bucket is private - generating pre-signed URL (valid for 7 days):"
-          PRESIGNED_URL=$(aws s3 presign s3://${{ env.S3_BUCKET }}/migration-instance.yaml --expires-in 604800 --region ${{ env.AWS_REGION }})
-          echo "   $PRESIGNED_URL"
-          echo ""
-          echo "🚀 One-Click Deploy URL (7-day expiry):"
-          ENCODED_URL=$(echo "$PRESIGNED_URL" | sed 's/:/%3A/g; s/\//%2F/g; s/&/%26/g')
-          echo "   https://console.aws.amazon.com/cloudformation/home?region=${{ env.AWS_REGION }}#/stacks/create/review?templateURL=$ENCODED_URL&stackName=Redis-Migration-Stack"
-          echo ""
-          echo "⚠️  Note: Pre-signed URLs expire after 7 days. For permanent access, consider making the bucket public."
-        fi
+        # Generate one-click deploy URL with pre-signed URL
+        echo "🚀 One-Click Deploy URL (30-day expiry):"
+        ENCODED_URL=$(echo "$PRESIGNED_URL" | sed 's/:/%3A/g; s/\//%2F/g; s/&/%26/g; s/=/%3D/g; s/?/%3F/g')
+        echo "   https://console.aws.amazon.com/cloudformation/home?region=${{ env.AWS_REGION }}#/stacks/create/review?templateURL=$ENCODED_URL&stackName=Redis-Migration-Stack"
+        echo ""
+
+        # Generate shorter-term URL for immediate use
+        echo "🕐 Short-term URL (valid for 24 hours):"
+        SHORT_PRESIGNED_URL=$(aws s3 presign s3://${{ env.S3_BUCKET }}/migration-instance.yaml --expires-in 86400 --region ${{ env.AWS_REGION }})
+        echo "   $SHORT_PRESIGNED_URL"
+        echo ""
+
+        # Save URLs to environment for later steps
+        echo "PRESIGNED_URL_30D=$PRESIGNED_URL" >> $GITHUB_ENV
+        echo "PRESIGNED_URL_24H=$SHORT_PRESIGNED_URL" >> $GITHUB_ENV
+
+        echo "✅ Secure access configured - no public bucket policy required"
+        echo "🔐 All access is controlled via pre-signed URLs with expiration"
         echo ""
         
     - name: 📝 Update Deployment Log
@@ -104,7 +106,12 @@ jobs:
             "s3_bucket": "${{ env.S3_BUCKET }}",
             "aws_region": "${{ env.AWS_REGION }}",
             "template_size": $(stat -c%s migration-instance.yaml),
-            "public_url": "https://${{ env.S3_BUCKET }}.s3.${{ env.AWS_REGION }}.amazonaws.com/migration-instance.yaml"
+            "access_method": "pre-signed-urls",
+            "security_level": "private-bucket",
+            "presigned_url_30d": "${{ env.PRESIGNED_URL_30D }}",
+            "presigned_url_24h": "${{ env.PRESIGNED_URL_24H }}",
+            "url_expiry_30d": "$(date -u -d '+30 days' +%Y-%m-%dT%H:%M:%SZ)",
+            "url_expiry_24h": "$(date -u -d '+1 day' +%Y-%m-%dT%H:%M:%SZ)"
           }
         }
         EOF

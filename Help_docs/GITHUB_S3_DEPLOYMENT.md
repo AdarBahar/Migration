@@ -6,10 +6,10 @@ This guide explains how to set up automatic deployment of the CloudFormation tem
 
 The GitHub Actions workflow automatically:
 - ✅ **Validates** the CloudFormation template
-- ✅ **Uploads** to S3 bucket when `migration-instance.yaml` changes
-- ✅ **Generates** public URLs for easy deployment
+- ✅ **Uploads** to private S3 bucket when `migration-instance.yaml` changes
+- ✅ **Generates** secure pre-signed URLs for deployment
 - ✅ **Creates** deployment logs for tracking
-- ✅ **Provides** one-click deploy links
+- ✅ **Provides** secure one-click deploy links with time-limited access
 
 ## 🔧 **Setup Requirements**
 
@@ -22,22 +22,13 @@ You need an S3 bucket to store the CloudFormation template.
 aws s3 mb s3://your-cloudformation-templates --region us-east-1
 ```
 
-#### **Configure Bucket for Public Read (Optional):**
+#### **Configure Bucket for Secure Access:**
 ```bash
-# Make the bucket publicly readable for CloudFormation
-aws s3api put-bucket-policy --bucket your-cloudformation-templates --policy '{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Sid": "PublicReadGetObject",
-      "Effect": "Allow",
-      "Principal": "*",
-      "Action": "s3:GetObject",
-      "Resource": "arn:aws:s3:::your-cloudformation-templates/*"
-    }
-  ]
-}'
+# Enable block public access for maximum security
+aws s3api put-public-access-block --bucket your-cloudformation-templates --public-access-block-configuration "BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true"
 ```
+
+**Note**: This setup uses pre-signed URLs instead of public bucket policies for enhanced security.
 
 ### **2. AWS IAM User for GitHub Actions**
 
@@ -140,16 +131,21 @@ The workflow runs when:
 7. **📝 Deployment Log** - Creates timestamped deployment record
 8. **🎉 Summary** - Shows completion status and next steps
 
-### **Generated URLs:**
+### **Generated Secure URLs:**
 
-#### **Public S3 URL:**
+#### **Pre-signed S3 URL (30-day validity):**
 ```
-https://your-bucket-name.s3.us-east-1.amazonaws.com/migration-instance.yaml
+https://your-bucket-name.s3.us-east-1.amazonaws.com/migration-instance.yaml?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=...&X-Amz-Expires=2592000&...
 ```
 
-#### **One-Click Deploy URL:**
+#### **Secure One-Click Deploy URL:**
 ```
-https://console.aws.amazon.com/cloudformation/home?region=us-east-1#/stacks/create/review?templateURL=https%3A//your-bucket-name.s3.us-east-1.amazonaws.com/migration-instance.yaml&stackName=Redis-Migration-Stack
+https://console.aws.amazon.com/cloudformation/home?region=us-east-1#/stacks/create/review?templateURL=[encoded-presigned-url]&stackName=Redis-Migration-Stack
+```
+
+#### **Short-term URL (24-hour validity):**
+```
+https://your-bucket-name.s3.us-east-1.amazonaws.com/migration-instance.yaml?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=...&X-Amz-Expires=86400&...
 ```
 
 ## 📋 **Usage Examples**
