@@ -67,24 +67,24 @@ jobs:
         echo ""
 
         # Generate pre-signed URL (30 days for longer validity)
-        echo "🔒 Secure Pre-signed URL (valid for 30 days):"
+        echo "🔒 Generating secure pre-signed URL (valid for 30 days)..."
         PRESIGNED_URL=$(aws s3 presign s3://${{ env.S3_BUCKET }}/migration-instance.yaml --expires-in 2592000 --region ${{ env.AWS_REGION }})
-        echo "   $PRESIGNED_URL"
+        echo "   ✅ 30-day pre-signed URL generated successfully"
         echo ""
 
         # Generate one-click deploy URL with pre-signed URL
-        echo "🚀 One-Click Deploy URL (30-day expiry):"
+        echo "🚀 Generating one-click deploy URL (30-day expiry)..."
         ENCODED_URL=$(echo "$PRESIGNED_URL" | sed 's/:/%3A/g; s/\//%2F/g; s/&/%26/g; s/=/%3D/g; s/?/%3F/g')
-        echo "   https://console.aws.amazon.com/cloudformation/home?region=${{ env.AWS_REGION }}#/stacks/create/review?templateURL=$ENCODED_URL&stackName=Redis-Migration-Stack"
+        echo "   ✅ One-click deploy URL generated successfully"
         echo ""
 
         # Generate shorter-term URL for immediate use
-        echo "🕐 Short-term URL (valid for 24 hours):"
+        echo "🕐 Generating short-term URL (valid for 24 hours)..."
         SHORT_PRESIGNED_URL=$(aws s3 presign s3://${{ env.S3_BUCKET }}/migration-instance.yaml --expires-in 86400 --region ${{ env.AWS_REGION }})
-        echo "   $SHORT_PRESIGNED_URL"
+        echo "   ✅ 24-hour pre-signed URL generated successfully"
         echo ""
 
-        # Save URLs to environment for later steps
+        # Save URLs to environment for later steps (not logged)
         echo "PRESIGNED_URL_30D=$PRESIGNED_URL" >> $GITHUB_ENV
         echo "PRESIGNED_URL_24H=$SHORT_PRESIGNED_URL" >> $GITHUB_ENV
 
@@ -108,8 +108,8 @@ jobs:
             "template_size": $(stat -c%s migration-instance.yaml),
             "access_method": "pre-signed-urls",
             "security_level": "private-bucket",
-            "presigned_url_30d": "${{ env.PRESIGNED_URL_30D }}",
-            "presigned_url_24h": "${{ env.PRESIGNED_URL_24H }}",
+            "presigned_url_30d_generated": true,
+            "presigned_url_24h_generated": true,
             "url_expiry_30d": "$(date -u -d '+30 days' +%Y-%m-%dT%H:%M:%SZ)",
             "url_expiry_24h": "$(date -u -d '+1 day' +%Y-%m-%dT%H:%M:%SZ)"
           }
@@ -123,20 +123,59 @@ jobs:
           --region ${{ env.AWS_REGION }}
           
         echo "✅ Deployment log saved to S3"
-        
+
+    - name: 📋 Create Secure URL File
+      run: |
+        echo "📋 Creating secure URL file for download..."
+        cat > secure-urls.txt << EOF
+        🔒 Redis Migration CloudFormation Template - Secure Access URLs
+        Generated: $(date -u +%Y-%m-%dT%H:%M:%SZ)
+        Commit: ${{ github.sha }}
+
+        📍 SECURE PRE-SIGNED URLS:
+
+        🔒 30-Day Pre-signed URL (expires $(date -u -d '+30 days' +%Y-%m-%d)):
+        ${{ env.PRESIGNED_URL_30D }}
+
+        🕐 24-Hour Pre-signed URL (expires $(date -u -d '+1 day' +%Y-%m-%d)):
+        ${{ env.PRESIGNED_URL_24H }}
+
+        🚀 One-Click Deploy URL (30-day expiry):
+        https://console.aws.amazon.com/cloudformation/home?region=${{ env.AWS_REGION }}#/stacks/create/review?templateURL=$(echo "${{ env.PRESIGNED_URL_30D }}" | sed 's/:/%3A/g; s/\//%2F/g; s/&/%26/g; s/=/%3D/g; s/?/%3F/g')&stackName=Redis-Migration-Stack
+
+        📝 SECURITY NOTES:
+        - These URLs provide time-limited access to the CloudFormation template
+        - URLs automatically expire after the specified time period
+        - S3 bucket remains private with no public access
+        - Use the 30-day URL for sharing, 24-hour URL for immediate deployment
+
+        EOF
+
+        # Upload secure URLs file to S3 (private)
+        aws s3 cp secure-urls.txt \
+          s3://${{ env.S3_BUCKET }}/deployment-urls/$(date +%Y%m%d-%H%M%S)-${{ github.sha }}-urls.txt \
+          --content-type "text/plain" \
+          --region ${{ env.AWS_REGION }}
+
+        echo "✅ Secure URLs file uploaded to S3 (private access only)"
+        echo "📍 Location: s3://${{ env.S3_BUCKET }}/deployment-urls/$(date +%Y%m%d-%H%M%S)-${{ github.sha }}-urls.txt"
+
     - name: 🎉 Deployment Summary
       run: |
         echo "🎉 Deployment Complete!"
         echo "================================"
         echo "✅ CloudFormation template validated"
-        echo "✅ Template uploaded to S3"
+        echo "✅ Template uploaded to private S3 bucket"
+        echo "✅ Secure pre-signed URLs generated"
         echo "✅ Deployment log created"
-        echo "✅ Public URLs generated"
+        echo "✅ Secure URLs file uploaded to S3"
         echo ""
         echo "📋 Next Steps:"
-        echo "1. Use the One-Click Deploy URL to launch the stack"
-        echo "2. Or reference the S3 URL in your CloudFormation deployments"
+        echo "1. Download the secure URLs file from S3 for deployment links"
+        echo "2. Use the one-click deploy URL for immediate CloudFormation deployment"
         echo "3. Check deployment logs in S3 for detailed information"
+        echo ""
+        echo "🔒 Security: All URLs are time-limited and bucket remains private"
 
   notify-on-failure:
     name: 🚨 Notify on Failure
