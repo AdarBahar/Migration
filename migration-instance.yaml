@@ -60,7 +60,7 @@ Parameters:
     Description: >
       The Subnet ID where the instance will be launched.
       📍 AWS Console > VPC > Subnets (must belong to the above VPC)
-      ⚠️  IMPORTANT: Must be a PUBLIC subnet (with Internet Gateway route)
+      💡 Note: Internet Gateway and routing will be automatically configured by this template
       💡 Note: Public IP will be automatically assigned regardless of subnet auto-assign setting
 
   AmiId:
@@ -91,6 +91,50 @@ Parameters:
     ConstraintDescription: Must be a valid EC2 instance type
 
 Resources:
+  # Internet Gateway for public access
+  MigrationInternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub "${StackName}-IGW"
+        - Key: Project
+          Value: !Ref StackName
+
+  # Attach Internet Gateway to VPC
+  MigrationInternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VpcId
+      InternetGatewayId: !Ref MigrationInternetGateway
+
+  # Route table for public subnet
+  MigrationRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VpcId
+      Tags:
+        - Key: Name
+          Value: !Sub "${StackName}-PublicRouteTable"
+        - Key: Project
+          Value: !Ref StackName
+
+  # Route to Internet Gateway
+  MigrationPublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: MigrationInternetGatewayAttachment
+    Properties:
+      RouteTableId: !Ref MigrationRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref MigrationInternetGateway
+
+  # Associate route table with subnet
+  MigrationSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref SubnetId
+      RouteTableId: !Ref MigrationRouteTable
+
   MigrationInstanceRole:
     Type: AWS::IAM::Role
     Properties:
