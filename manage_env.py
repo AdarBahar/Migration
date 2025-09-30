@@ -52,9 +52,79 @@ def prompt_env(key, label, secret=False, default=None, max_length=None, allow_em
     set_key(ENV_PATH, key, new_value)
     reload_env()
 
+def setup_source_connection():
+    """Setup source Redis connection using AWS ElastiCache CLI command."""
+    print(f"\n🔧 Configuring Source Redis (AWS ElastiCache)")
+    print("=" * 50)
+
+    # Get friendly name
+    prompt_env("REDIS_SOURCE_NAME", "Name (friendly label)", max_length=50)
+
+    # Instructions for getting AWS CLI command
+    print("\n📋 AWS ElastiCache Connection Instructions:")
+    print("1. Go to AWS Console > ElastiCache > Redis OSS caches")
+    print("2. Click on your cache cluster")
+    print("3. Go to 'Connecting to your cache' tab")
+    print("4. Select 'AWS CloudShell / CLI' tab")
+    print("5. Copy the entire redis-cli command")
+    print()
+    print("💡 Expected format:")
+    print("   redis6-cli --tls -h your-cache.amazonaws.com -p 6379")
+    print("   redis-cli -h your-cache.amazonaws.com -p 6379")
+    print()
+
+    while True:
+        cli_command = input("🔗 AWS redis-cli command: ").strip()
+
+        if not cli_command:
+            print("❌ Command cannot be empty. Please enter a valid redis-cli command.")
+            continue
+
+        # Parse the CLI command
+        parsed = parse_aws_redis_cli(cli_command)
+
+        if not parsed:
+            print("❌ Invalid redis-cli command format.")
+            print("💡 Expected format: redis6-cli --tls -h host.amazonaws.com -p 6379")
+            print("💡 Or: redis-cli -h host.amazonaws.com -p 6379")
+            continue
+
+        # Show parsed information for confirmation
+        print(f"\n✅ Successfully parsed AWS redis-cli command:")
+        print(f"   🏠 Host: {parsed['host']}")
+        print(f"   🔌 Port: {parsed['port']}")
+        print(f"   🔐 TLS: {'Enabled' if parsed['tls'] else 'Disabled'}")
+        print()
+
+        confirm = input("Is this information correct? (y/n): ").strip().lower()
+        if confirm == 'y':
+            break
+        else:
+            print("Please enter the command again.")
+
+    # Set the parsed values in environment
+    set_key(ENV_PATH, "REDIS_SOURCE_HOST", parsed['host'])
+    set_key(ENV_PATH, "REDIS_SOURCE_PORT", parsed['port'])
+    set_key(ENV_PATH, "REDIS_SOURCE_TLS", "true" if parsed['tls'] else "false")
+
+    # Set default database if not already set
+    if not os.getenv("REDIS_SOURCE_DB"):
+        set_key(ENV_PATH, "REDIS_SOURCE_DB", "0")
+
+    # Ask for password (ElastiCache might not need one, but allow setting)
+    print("\n🔒 Password Configuration:")
+    print("💡 Many AWS ElastiCache instances don't require a password")
+    print("💡 Press Enter to skip password, or enter one if your instance requires it")
+    prompt_env("REDIS_SOURCE_PASSWORD", "Password (optional)", secret=True, allow_empty=True)
+
+    reload_env()
+
+    print("✅ Source Redis configuration updated successfully!")
+    print("💡 You can test the connection using option 3 from the main menu.")
+
 def setup_connection(label_prefix):
-    """Prompt user for Redis connection config."""
-    print(f"\n🔧 Configuring {label_prefix.capitalize()} Redis")
+    """Legacy function - prompt user for Redis connection config manually."""
+    print(f"\n🔧 Configuring {label_prefix.capitalize()} Redis (Manual)")
     prompt_env(f"{label_prefix.upper()}_NAME", "Name (friendly label)", max_length=50)
     prompt_env(f"{label_prefix.upper()}_HOST", "Host")
     prompt_env(f"{label_prefix.upper()}_PORT", "Port")
@@ -97,6 +167,62 @@ def parse_redis_url(redis_url):
         "tls": tls
     }
 
+def parse_aws_redis_cli(cli_command):
+    """Parse AWS ElastiCache redis-cli command and extract connection parameters.
+
+    Supports formats:
+    - redis6-cli --tls -h host.amazonaws.com -p 6379
+    - redis-cli -h host.amazonaws.com -p 6379
+    - redis6-cli -h host.amazonaws.com -p 6379 --tls
+
+    Returns dict with parsed parameters or None if invalid.
+    """
+    if not cli_command or not cli_command.strip():
+        return None
+
+    command = cli_command.strip()
+
+    # Check if it's a redis-cli command
+    if not (command.startswith('redis-cli') or command.startswith('redis6-cli')):
+        return None
+
+    # Initialize defaults
+    host = None
+    port = "6379"
+    tls = False
+
+    # Split command into parts
+    parts = command.split()
+
+    # Parse arguments
+    i = 1  # Skip the redis-cli/redis6-cli part
+    while i < len(parts):
+        arg = parts[i]
+
+        if arg == '--tls':
+            tls = True
+            i += 1
+        elif arg == '-h' and i + 1 < len(parts):
+            host = parts[i + 1]
+            i += 2
+        elif arg == '-p' and i + 1 < len(parts):
+            port = parts[i + 1]
+            i += 2
+        else:
+            i += 1
+
+    # Validate that we got a host
+    if not host:
+        return None
+
+    return {
+        "host": host,
+        "port": port,
+        "tls": tls,
+        "user": "default",
+        "password": ""
+    }
+
 def setup_destination_connection():
     """Simplified destination Redis setup using Redis Cloud URL."""
     print(f"\n🔧 Configuring Destination Redis (Redis Cloud)")
@@ -106,32 +232,45 @@ def setup_destination_connection():
     prompt_env("REDIS_DEST_NAME", "Name (friendly label)", max_length=50)
 
     # Instructions for getting Redis Cloud URL
-    print("\n📋 Redis Cloud Connection URL Instructions:")
+    print("\n📋 Redis Cloud Connection Instructions:")
     print("1. Go to Redis Cloud > Your database")
     print("2. Click 'Connect to database'")
     print("3. Select 'Redis CLI' tab")
     print("4. Click 'Unmask the password'")
-    print("5. Copy the connection URL")
+    print("5. Copy the entire connection string")
     print()
     print("💡 Expected format:")
+    print("   redis-cli -u redis://<username>:<password>@redis-12850.c278.us-east-1-4.ec2.redns.redis-cloud.com:12850")
+    print("   redis-cli -u rediss://<username>:<password>@redis-12850.c278.us-east-1-4.ec2.redns.redis-cloud.com:12850")
+    print("   Or just the URL part:")
     print("   redis://default:<password>@redis-12850.c278.us-east-1-4.ec2.redns.redis-cloud.com:12850")
     print("   rediss://default:<password>@redis-12850.c278.us-east-1-4.ec2.redns.redis-cloud.com:12850")
     print()
 
     while True:
-        redis_url = input("🔗 Redis Cloud Connection URL: ").strip()
+        redis_input = input("🔗 Redis Cloud Connection (URL or redis-cli command): ").strip()
 
-        if not redis_url:
-            print("❌ URL cannot be empty. Please enter a valid Redis URL.")
+        if not redis_input:
+            print("❌ Input cannot be empty. Please enter a valid Redis connection string.")
             continue
+
+        # Check if it's a redis-cli command with -u flag
+        if redis_input.startswith('redis-cli -u '):
+            # Extract URL from redis-cli -u command
+            redis_url = redis_input.replace('redis-cli -u ', '').strip()
+        else:
+            # Assume it's a direct URL
+            redis_url = redis_input
 
         # Parse the URL
         parsed = parse_redis_url(redis_url)
 
         if not parsed:
-            print("❌ Invalid Redis URL format.")
-            print("💡 Expected format: redis://[user]:[password]@[host]:[port]")
-            print("💡 Or with TLS: rediss://[user]:[password]@[host]:[port]")
+            print("❌ Invalid Redis connection format.")
+            print("💡 Expected formats:")
+            print("   redis-cli -u redis://[user]:[password]@[host]:[port]")
+            print("   redis://[user]:[password]@[host]:[port]")
+            print("   rediss://[user]:[password]@[host]:[port] (with TLS)")
             continue
 
         # Show parsed information for confirmation
@@ -404,32 +543,86 @@ def main():
     while True:
         show_current_config()
         print("Choose an option:")
-        print("1. Edit Source Redis")
-        print("2. Edit Destination Redis (Redis Cloud)")
-        print("3. Test Source Redis")
-        print("4. Test Destination Redis")
-        print("5. Export Configuration")
-        print("6. Import Configuration")
-        print("7. Exit")
-        choice = input("Enter choice [1-7]: ").strip()
+        print("1. Configure Source Redis (AWS ElastiCache)")
+        print("2. Configure Destination Redis (Redis Cloud)")
+        print("3. Manual Source Redis Setup")
+        print("4. Test Source Redis")
+        print("5. Test Destination Redis")
+        print("6. Export Configuration")
+        print("7. Import Configuration")
+        print("8. Exit")
+        choice = input("Enter choice [1-8]: ").strip()
 
         if choice == "1":
-            setup_connection("REDIS_SOURCE")
+            setup_source_connection()
         elif choice == "2":
             setup_destination_connection()
         elif choice == "3":
-            test_redis_connection("REDIS_SOURCE")
+            setup_connection("REDIS_SOURCE")
         elif choice == "4":
-            test_redis_connection("REDIS_DEST")
+            test_redis_connection("REDIS_SOURCE")
         elif choice == "5":
-            export_configuration()
+            test_redis_connection("REDIS_DEST")
         elif choice == "6":
-            import_configuration()
+            export_configuration()
         elif choice == "7":
+            import_configuration()
+        elif choice == "8":
             print("✅ Exiting config tool.")
             break
         else:
             print("❌ Invalid choice, try again.")
 
+def test_parsers():
+    """Test the parsing functions with sample inputs."""
+    print("🧪 Testing Connection String Parsers")
+    print("=" * 40)
+
+    # Test AWS CLI parsing
+    aws_samples = [
+        "redis6-cli --tls -h adar-elasticache-redis-oss-nkwtpc.serverless.eun1.cache.amazonaws.com -p 6379",
+        "redis-cli -h my-cache.amazonaws.com -p 6379",
+        "redis6-cli -h test.cache.amazonaws.com -p 6380 --tls"
+    ]
+
+    print("\n🔧 AWS ElastiCache CLI Command Tests:")
+    for i, cmd in enumerate(aws_samples, 1):
+        print(f"\n{i}. Input: {cmd}")
+        result = parse_aws_redis_cli(cmd)
+        if result:
+            print(f"   ✅ Host: {result['host']}")
+            print(f"   ✅ Port: {result['port']}")
+            print(f"   ✅ TLS: {result['tls']}")
+        else:
+            print("   ❌ Failed to parse")
+
+    # Test Redis URL parsing
+    redis_samples = [
+        "redis://default:mypassword@redis-12850.c278.us-east-1-4.ec2.redns.redis-cloud.com:12850",
+        "rediss://user:pass123@redis-test.redns.redis-cloud.com:15000",
+        "redis-cli -u redis://default:secret@redis-prod.redns.redis-cloud.com:16000"
+    ]
+
+    print("\n🔗 Redis Cloud URL Tests:")
+    for i, url in enumerate(redis_samples, 1):
+        print(f"\n{i}. Input: {url}")
+        # Handle redis-cli -u format
+        test_url = url.replace('redis-cli -u ', '') if url.startswith('redis-cli -u ') else url
+        result = parse_redis_url(test_url)
+        if result:
+            print(f"   ✅ Host: {result['host']}")
+            print(f"   ✅ Port: {result['port']}")
+            print(f"   ✅ User: {result['user']}")
+            print(f"   ✅ Password: {'***' + result['password'][-4:] if len(result['password']) > 4 else '***'}")
+            print(f"   ✅ TLS: {result['tls']}")
+        else:
+            print("   ❌ Failed to parse")
+
+    print("\n✅ Parser testing complete!")
+
 if __name__ == "__main__":
-    main()
+    import sys
+    if len(sys.argv) > 1 and sys.argv[1] == "test":
+        test_parsers()
+    else:
+        main()
