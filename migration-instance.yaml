@@ -60,7 +60,8 @@ Parameters:
     Description: >
       The Subnet ID where the instance will be launched.
       📍 AWS Console > VPC > Subnets (must belong to the above VPC)
-      💡 Note: Internet Gateway and routing will be automatically configured by this template
+      💡 Note: If CreateNetworkingResources=true, Internet Gateway and routing will be configured automatically
+      💡 Note: If CreateNetworkingResources=false, ensure your subnet has proper internet routing
       💡 Note: Public IP will be automatically assigned regardless of subnet auto-assign setting
 
   AmiId:
@@ -90,10 +91,25 @@ Parameters:
       - t3.large
     ConstraintDescription: Must be a valid EC2 instance type
 
+  CreateNetworkingResources:
+    Type: String
+    Default: 'true'
+    Description: >
+      Whether to create Internet Gateway and routing resources.
+      📍 Set to 'false' if your VPC already has an Internet Gateway and proper routing
+      📍 Set to 'true' if you need the template to create networking infrastructure
+    AllowedValues:
+      - 'true'
+      - 'false'
+
+Conditions:
+  ShouldCreateNetworking: !Equals [!Ref CreateNetworkingResources, 'true']
+
 Resources:
   # Internet Gateway for public access
   MigrationInternetGateway:
     Type: AWS::EC2::InternetGateway
+    Condition: ShouldCreateNetworking
     Properties:
       Tags:
         - Key: Name
@@ -104,6 +120,7 @@ Resources:
   # Attach Internet Gateway to VPC
   MigrationInternetGatewayAttachment:
     Type: AWS::EC2::VPCGatewayAttachment
+    Condition: ShouldCreateNetworking
     Properties:
       VpcId: !Ref VpcId
       InternetGatewayId: !Ref MigrationInternetGateway
@@ -111,6 +128,7 @@ Resources:
   # Route table for public subnet
   MigrationRouteTable:
     Type: AWS::EC2::RouteTable
+    Condition: ShouldCreateNetworking
     Properties:
       VpcId: !Ref VpcId
       Tags:
@@ -122,6 +140,7 @@ Resources:
   # Route to Internet Gateway
   MigrationPublicRoute:
     Type: AWS::EC2::Route
+    Condition: ShouldCreateNetworking
     DependsOn: MigrationInternetGatewayAttachment
     Properties:
       RouteTableId: !Ref MigrationRouteTable
@@ -131,6 +150,7 @@ Resources:
   # Associate route table with subnet
   MigrationSubnetRouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
+    Condition: ShouldCreateNetworking
     Properties:
       SubnetId: !Ref SubnetId
       RouteTableId: !Ref MigrationRouteTable
