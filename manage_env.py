@@ -240,11 +240,11 @@ def setup_destination_connection():
     print("5. Copy the entire connection string")
     print()
     print("💡 Expected format:")
-    print("   redis-cli -u redis://<username>:<password>@redis-12850.c278.us-east-1-4.ec2.redns.redis-cloud.com:12850")
-    print("   redis-cli -u rediss://<username>:<password>@redis-12850.c278.us-east-1-4.ec2.redns.redis-cloud.com:12850")
+    print("   redis-cli -u redis://<username>:<password>@redis-xxxxx.c123.region-1.ec2.redns.redis-cloud.com:12345")
+    print("   redis-cli -u rediss://<username>:<password>@redis-xxxxx.c123.region-1.ec2.redns.redis-cloud.com:12345")
     print("   Or just the URL part:")
-    print("   redis://default:<password>@redis-12850.c278.us-east-1-4.ec2.redns.redis-cloud.com:12850")
-    print("   rediss://default:<password>@redis-12850.c278.us-east-1-4.ec2.redns.redis-cloud.com:12850")
+    print("   redis://default:<password>@redis-xxxxx.c123.region-1.ec2.redns.redis-cloud.com:12345")
+    print("   rediss://default:<password>@redis-xxxxx.c123.region-1.ec2.redns.redis-cloud.com:12345")
     print()
 
     while True:
@@ -598,9 +598,9 @@ def test_parsers():
 
     # Test Redis URL parsing
     redis_samples = [
-        "redis://default:mypassword@redis-12850.c278.us-east-1-4.ec2.redns.redis-cloud.com:12850",
-        "rediss://user:pass123@redis-test.redns.redis-cloud.com:15000",
-        "redis-cli -u redis://default:secret@redis-prod.redns.redis-cloud.com:16000"
+        "redis://default:mypassword@redis-xxxxx.c123.region-1.ec2.redns.redis-cloud.com:12345",
+        "rediss://user:pass123@redis-yyyyy.c456.region-2.ec2.redns.redis-cloud.com:15000",
+        "redis-cli -u redis://default:secret@redis-zzzzz.c789.region-3.ec2.redns.redis-cloud.com:16000"
     ]
 
     print("\n🔗 Redis Cloud URL Tests:")
