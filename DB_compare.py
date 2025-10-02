@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 load_dotenv(".env")
 
 # Configuration
-REFRESH_INTERVAL = 5  # seconds
+REFRESH_INTERVAL = 5  # seconds (default, can be overridden by user input)
 MAX_DIFF_PREVIEW = 5  # number of keys to preview
 REDIS_TIMEOUT = 5     # connection and read timeout (seconds)
 
@@ -47,6 +47,41 @@ def scan_all_keys(redis_client):
             break
     return keys
 
+def get_user_interval():
+    """Prompt user for comparison interval with default of 5 seconds."""
+    print("\n⚙️ Configuration Setup")
+    print("-" * 30)
+
+    while True:
+        try:
+            user_input = input("🕒 Enter comparison interval in seconds (default: 5): ").strip()
+
+            # Use default if empty input
+            if not user_input:
+                interval = 5
+                print(f"✅ Using default interval: {interval} seconds")
+                return interval
+
+            # Parse user input
+            interval = float(user_input)
+
+            # Validate range
+            if interval < 0.5:
+                print("⚠️ Interval too short. Minimum is 0.5 seconds.")
+                continue
+            elif interval > 300:
+                print("⚠️ Interval too long. Maximum is 300 seconds (5 minutes).")
+                continue
+
+            print(f"✅ Using interval: {interval} seconds")
+            return interval
+
+        except ValueError:
+            print("❌ Invalid input. Please enter a number.")
+        except KeyboardInterrupt:
+            print("\n\n👋 Exiting...")
+            exit(0)
+
 def get_redis_stats(redis_client):
     """Fetch all keys using SCAN and return table info."""
     try:
@@ -57,7 +92,7 @@ def get_redis_stats(redis_client):
         print(f"⚠️ Error fetching Redis stats: {e}")
         return 0, 0, set()
 
-def compare_dbs(source, dest, name1, name2):
+def compare_dbs(source, dest, name1, name2, interval=5.0):
     """Live comparison loop between two Redis databases."""
     while True:
         print("🔄 Fetching stats...", end="\r")
@@ -99,12 +134,15 @@ def compare_dbs(source, dest, name1, name2):
                 print(f"   - Keys only in {name2} ({len(only_in_2)}): {preview}{'...' if len(only_in_2) > MAX_DIFF_PREVIEW else ''}")
 
         print(f"\n🕒 Last Refreshed: {last_refreshed}")
-        print(f"🔄 Refreshing in {REFRESH_INTERVAL} seconds...\n")
-        time.sleep(REFRESH_INTERVAL)
+        print(f"🔄 Refreshing in {interval} seconds...\n")
+        time.sleep(interval)
 
 # ---- Main Execution ----
 if __name__ == "__main__":
     print("🚀 Starting Redis Comparison Tool with Environment Configuration")
+
+    # Get user-defined comparison interval
+    comparison_interval = get_user_interval()
 
     # Source Redis config from .env
     source_name = os.getenv("REDIS_SOURCE_NAME") or "Source"
@@ -131,4 +169,4 @@ if __name__ == "__main__":
     # Connect and run comparison
     redis1 = connect_to_redis(source_name, source_host, source_port, source_password, source_tls)
     redis2 = connect_to_redis(dest_name, dest_host, dest_port, dest_password, dest_tls)
-    compare_dbs(redis1, redis2, source_name, dest_name)
+    compare_dbs(redis1, redis2, source_name, dest_name, comparison_interval)
