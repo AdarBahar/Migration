@@ -686,24 +686,47 @@ def main():
     }
     print(json.dumps(inst_info, indent=2))
 
-    # Route tables & NACLs
-    rts = get_route_tables_for_subnet(ec2, inst_info["SubnetId"])
-    nacls = get_nacls_for_subnet(ec2, inst_info["SubnetId"])
-    print("\nRouteTables (instance subnet):")
-    print(json.dumps([{"RouteTableId": rt["RouteTableId"], "Associations": rt.get("Associations", []), "Routes": rt.get("Routes", [])} for rt in rts], indent=2))
-    print("\nNetworkACLs (instance subnet):")
-    print(json.dumps([{"NetworkAclId": n["NetworkAclId"], "Entries": n.get("Entries", [])} for n in nacls], indent=2))
+    # Route tables & NACLs (with permission handling)
+    print("\nRoute Tables & Network ACLs:")
+    try:
+        rts = get_route_tables_for_subnet(ec2, inst_info["SubnetId"])
+        print("RouteTables (instance subnet):")
+        print(json.dumps([{"RouteTableId": rt["RouteTableId"], "Associations": rt.get("Associations", []), "Routes": rt.get("Routes", [])} for rt in rts], indent=2))
+    except botocore.exceptions.ClientError as e:
+        if "UnauthorizedOperation" in str(e):
+            print("⚠️ Route table analysis skipped - insufficient permissions (ec2:DescribeRouteTables)")
+        else:
+            print(f"❌ Error getting route tables: {e}")
+
+    try:
+        nacls = get_nacls_for_subnet(ec2, inst_info["SubnetId"])
+        print("\nNetworkACLs (instance subnet):")
+        print(json.dumps([{"NetworkAclId": n["NetworkAclId"], "Entries": n.get("Entries", [])} for n in nacls], indent=2))
+    except botocore.exceptions.ClientError as e:
+        if "UnauthorizedOperation" in str(e):
+            print("⚠️ Network ACL analysis skipped - insufficient permissions (ec2:DescribeNetworkAcls)")
+        else:
+            print(f"❌ Error getting network ACLs: {e}")
 
     # Find ElastiCache object
     print_header("ElastiCache Discovery")
-    target = find_elasticache_target(ecc, host, port)
-    if target["type"] == "unknown":
-        print("WARN: Could not match endpoint to a replication group or cluster in this region.")
-        cache_net = {}
-    else:
-        print(f"Matched ElastiCache type: {target['type']}")
-        cache_net = collect_elasticache_networking(ecc, ec2, target)
-        print(json.dumps(cache_net, indent=2))
+    try:
+        target = find_elasticache_target(ecc, host, port)
+        if target["type"] == "unknown":
+            print("WARN: Could not match endpoint to a replication group or cluster in this region.")
+            cache_net = {}
+        else:
+            print(f"Matched ElastiCache type: {target['type']}")
+            cache_net = collect_elasticache_networking(ecc, ec2, target)
+            print(json.dumps(cache_net, indent=2))
+    except botocore.exceptions.ClientError as e:
+        if "UnauthorizedOperation" in str(e):
+            print("⚠️ ElastiCache discovery skipped - insufficient permissions")
+            print("   Required permissions: elasticache:DescribeReplicationGroups, elasticache:DescribeCacheClusters")
+            cache_net = {}
+        else:
+            print(f"❌ Error during ElastiCache discovery: {e}")
+            cache_net = {}
 
     # Compare VPCs
     print_header("VPC / Subnet Comparison")
