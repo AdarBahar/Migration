@@ -16,8 +16,8 @@ Supports various input formats:
 - Host only: host.cache.amazonaws.com (defaults to port 6379)
 """
 
+import ipaddress
 import json
-import os
 import re
 import socket
 import ssl
@@ -165,6 +165,7 @@ def get_user_input():
     }
 
 def get_imds_token() -> Optional[str]:
+    """Get IMDS v2 token for secure metadata access."""
     try:
         r = requests.put(
             IMDS_BASE + "/latest/api/token",
@@ -173,8 +174,12 @@ def get_imds_token() -> Optional[str]:
         )
         if r.status_code == 200:
             return r.text
-    except Exception:
-        pass
+    except (requests.exceptions.RequestException, requests.exceptions.Timeout) as e:
+        # Network issues, timeouts, or connection errors
+        print(f"DEBUG: IMDS token retrieval failed: {e}")
+    except Exception as e:
+        # Other unexpected errors
+        print(f"DEBUG: Unexpected error getting IMDS token: {e}")
     return None
 
 def imds_get(path: str, token: Optional[str]) -> str:
@@ -276,13 +281,23 @@ def tcp_check(host: str, port: int, tls: bool, timeout=3) -> Tuple[bool, Optiona
     except Exception as e:
         return False, str(e)
 
-def get_boto3_clients(region: str):
+def get_boto3_clients(region: str) -> Tuple[boto3.client, boto3.client]:
+    """Get EC2 and ElastiCache boto3 clients for the specified region."""
     return (
         boto3.client("ec2", region_name=region),
         boto3.client("elasticache", region_name=region),
     )
 
-def find_self_instance(ec2):
+def find_self_instance(ec2) -> Dict:
+    """
+    Find the current EC2 instance details using IMDS or private IP lookup.
+
+    Returns:
+        Dict: EC2 instance description dict containing InstanceId, NetworkInterfaces, etc.
+
+    Raises:
+        RuntimeError: If instance cannot be identified via IMDS or private IP lookup.
+    """
     # Try IMDS
     token = get_imds_token()
     try:
@@ -351,12 +366,37 @@ def find_elasticache_target(ecc, host: str, port: int) -> Dict:
         for page in paginator.paginate():
             for rg in page.get("ReplicationGroups", []):
                 cep = rg.get("ConfigurationEndpoint")
-                if cep and cep.get("Address") == host and int(cep.get("Port", port)) == port:
-                    return {"type": "replication-group", "object": rg}
-                # Some RGs have member clusters with endpoints
-                for member in rg.get("MemberClusters", []):
-                    # fetch cluster for endpoint check
-                    pass
+                if cep and cep.get("Address") == host:
+                    # Only check port if it's explicitly provided in the endpoint
+                    endpoint_port = cep.get("Port")
+                    if endpoint_port is not None and int(endpoint_port) == port:
+                        return {"type": "replication-group", "object": rg}
+
+                # Check member clusters for endpoints
+                for member_id in rg.get("MemberClusters", []):
+                    try:
+                        member_resp = ecc.describe_cache_clusters(
+                            CacheClusterId=member_id,
+                            ShowCacheNodeInfo=True
+                        )
+                        member_cluster = member_resp["CacheClusters"][0]
+
+                        # Check member cluster endpoints
+                        member_endpoints = []
+                        if member_cluster.get("ConfigurationEndpoint"):
+                            member_endpoints.append(member_cluster["ConfigurationEndpoint"])
+                        for node in member_cluster.get("CacheNodes", []):
+                            if node.get("Endpoint"):
+                                member_endpoints.append(node["Endpoint"])
+
+                        for ep in member_endpoints:
+                            if ep.get("Address") == host:
+                                endpoint_port = ep.get("Port")
+                                if endpoint_port is not None and int(endpoint_port) == port:
+                                    return {"type": "replication-group", "object": rg}
+                    except Exception:
+                        # Skip member clusters that can't be described
+                        continue
     except ecc.exceptions.ReplicationGroupNotFoundFault:
         pass
     # Try clusters
@@ -372,9 +412,33 @@ def find_elasticache_target(ecc, host: str, port: int) -> Dict:
                 if node.get("Endpoint"):
                     endpoints.append(node["Endpoint"])
             for ep in endpoints:
-                if ep.get("Address") == host and int(ep.get("Port", port)) == port:
-                    return {"type": "cluster", "object": cc}
+                if ep.get("Address") == host:
+                    # Only check port if it's explicitly provided in the endpoint
+                    endpoint_port = ep.get("Port")
+                    if endpoint_port is not None and int(endpoint_port) == port:
+                        return {"type": "cluster", "object": cc}
     return {"type": "unknown", "object": None}
+
+def _extract_cluster_port(cc: Dict) -> Optional[int]:
+    """
+    Extract port from cluster configuration, checking both ConfigurationEndpoint and CacheNodes.
+    Returns None if no port can be determined reliably.
+    """
+    # Try ConfigurationEndpoint first
+    config_endpoint = cc.get("ConfigurationEndpoint")
+    if config_endpoint and "Port" in config_endpoint:
+        return config_endpoint["Port"]
+
+    # Try first cache node endpoint
+    cache_nodes = cc.get("CacheNodes", [])
+    if cache_nodes:
+        first_node = cache_nodes[0]
+        endpoint = first_node.get("Endpoint")
+        if endpoint and "Port" in endpoint:
+            return endpoint["Port"]
+
+    # Return None if no port found (caller should handle this)
+    return None
 
 def collect_elasticache_networking(ecc, ec2, target: Dict) -> Dict:
     """
@@ -413,15 +477,15 @@ def collect_elasticache_networking(ecc, ec2, target: Dict) -> Dict:
         "sg_ids": sg_ids,
         "engine": cc.get("Engine"),
         "engine_version": cc.get("EngineVersion"),
-        "port": cc.get("ConfigurationEndpoint", cc.get("CacheNodes", [{}])[0].get("Endpoint", {})).get("Port", 6379),
+        "port": _extract_cluster_port(cc),
         "cluster_id": cc.get("CacheClusterId"),
     }
 
 def cidr_contains(ip: str, cidr: str) -> bool:
-    import ipaddress
+    """Check if an IP address is contained within a CIDR block."""
     try:
         return ipaddress.ip_address(ip) in ipaddress.ip_network(cidr, strict=False)
-    except Exception:
+    except (ipaddress.AddressValueError, ipaddress.NetmaskValueError, ValueError):
         return False
 
 def sg_allows_ingress_from_instance(sg: Dict, inst_sg_ids: List[str], inst_ip: str, port: int) -> bool:
@@ -455,23 +519,47 @@ def sg_allows_ingress_from_instance(sg: Dict, inst_sg_ids: List[str], inst_ip: s
     return False
 
 def sg_allows_egress_to_cache(inst_sg: Dict, cache_ips: List[str], port: int) -> bool:
-    # If wide-open egress (-1 or tcp all) that's fine
+    """
+    Check if instance security group allows egress to cache IPs on the specified port.
+    Returns True if egress is allowed, False otherwise.
+    """
+    if not cache_ips:
+        # If no cache IPs provided, cannot determine egress allowance
+        return False
+
     for rule in inst_sg.get("IpPermissionsEgress", []):
         ip_proto = rule.get("IpProtocol")
         from_p = rule.get("FromPort")
         to_p = rule.get("ToPort")
-        # -1 means all
+
+        # -1 means all protocols/ports
         if ip_proto == "-1":
             return True
+
         if ip_proto != "tcp":
             continue
+
         if from_p is None or to_p is None:
             continue
+
         if not (from_p <= port <= to_p):
             continue
-        # Any CIDR destination is fine; SG refs not supported in egress dest
-        if rule.get("IpRanges") or rule.get("Ipv6Ranges"):
-            return True
+
+        # Check if any cache IP is covered by the rule's CIDR ranges
+        for ip_range in rule.get("IpRanges", []):
+            cidr = ip_range.get("CidrIp")
+            if cidr:
+                for cache_ip in cache_ips:
+                    if cidr_contains(cache_ip, cidr):
+                        return True
+
+        for ipv6_range in rule.get("Ipv6Ranges", []):
+            cidr6 = ipv6_range.get("CidrIpv6")
+            if cidr6:
+                for cache_ip in cache_ips:
+                    if cidr_contains(cache_ip, cidr6):
+                        return True
+
     return False
 
 def add_ingress_to_cache_sg(ec2, cache_sg_id: str, inst_sg_id: str, port: int) -> Tuple[bool, str]:
@@ -493,6 +581,21 @@ def add_ingress_to_cache_sg(ec2, cache_sg_id: str, inst_sg_id: str, port: int) -
         return False, msg
 
 def add_egress_on_instance_sg(ec2, inst_sg_id: str, port: int) -> Tuple[bool, str]:
+    """
+    Add egress rule to instance security group for the specified port.
+
+    SECURITY WARNING: This adds a permissive egress rule allowing outbound traffic
+    to 0.0.0.0/0 on the specified port. For tighter security, consider restricting
+    egress to specific CIDR ranges (e.g., ElastiCache subnet ranges) instead.
+
+    Args:
+        ec2: EC2 client
+        inst_sg_id: Instance security group ID
+        port: Port to allow egress on
+
+    Returns:
+        Tuple of (success: bool, message: str)
+    """
     try:
         ec2.authorize_security_group_egress(
             GroupId=inst_sg_id,
@@ -567,7 +670,12 @@ def main():
         print(f"ERROR: Could not identify this instance: {e}")
         sys.exit(1)
 
-    primary_eni = sorted(inst.get("NetworkInterfaces", []), key=lambda x: x.get("Attachment", {}).get("DeviceIndex", 0))[0]
+    network_interfaces = inst.get("NetworkInterfaces", [])
+    if not network_interfaces:
+        print("ERROR: Instance has no network interfaces")
+        sys.exit(1)
+
+    primary_eni = sorted(network_interfaces, key=lambda x: x.get("Attachment", {}).get("DeviceIndex", 0))[0]
     inst_info = {
         "InstanceId": inst["InstanceId"],
         "PrivateIp": primary_eni["PrivateIpAddress"],
@@ -626,11 +734,15 @@ def main():
             ingress_ok = False
             print("No cache SGs found (or not discoverable).")
         # Egress on instance SGs
-        # Treat as ok if ANY instance SG permits egress to port (most defaults do)
-        egress_ok = any(
-            sg_allows_egress_to_cache(inst_sgs[sgid], ips or ["0.0.0.0"], port) for sgid in inst_sgs
-        )
-        print(f"Egress on instance SGs allows port {port}? {'YES' if egress_ok else 'NO'}")
+        if ips:
+            # Check if ANY instance SG permits egress to the actual cache IPs
+            egress_ok = any(
+                sg_allows_egress_to_cache(inst_sgs[sgid], ips, port) for sgid in inst_sgs
+            )
+            print(f"Egress on instance SGs allows port {port} to cache IPs? {'YES' if egress_ok else 'NO'}")
+        else:
+            egress_ok = False
+            print(f"Egress check skipped - DNS resolution failed for {host}")
 
         # Suggest/apply fixes
         if not ingress_ok and cache_sgs and apply_fixes:
