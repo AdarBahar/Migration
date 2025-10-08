@@ -190,6 +190,25 @@ Resources:
                   - elasticache:CreateCacheParameterGroup
                   - elasticache:DescribeCacheParameterGroups
                 Resource: '*'
+        - PolicyName: EC2NetworkingDiagnostics
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  # EC2 networking diagnostics permissions
+                  - ec2:DescribeNetworkInterfaces
+                  - ec2:DescribeRouteTables
+                  - ec2:DescribeNetworkAcls
+                  - ec2:AuthorizeSecurityGroupEgress
+                  # ElastiCache connectivity diagnostics permissions
+                  - elasticache:DescribeReplicationGroups
+                  - elasticache:DescribeCacheClusters
+                  - elasticache:DescribeCacheSubnetGroups
+                Resource: '*'
+                Condition:
+                  StringEquals:
+                    'aws:RequestedRegion': !Ref 'AWS::Region'
 
   MigrationInstanceProfile:
     Type: AWS::IAM::InstanceProfile
