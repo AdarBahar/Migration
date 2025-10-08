@@ -300,16 +300,16 @@ class ElastiCacheProvisioner:
             print(f"❌ Failed to get VPC subnets: {e}")
             return []
 
-    def create_security_group(self, vpc_id, source_security_groups):
+    def create_security_group(self, vpc_id, source_security_groups, engine='redis', port=6379):
         """Create a security group for ElastiCache that allows access from EC2."""
-        sg_name = f"elasticache-redis-{int(time.time())}"
+        sg_name = f"elasticache-{engine}-{int(time.time())}"
 
         # Update description to reflect both SG-based and optional VPC CIDR access
         allow_vpc_cidr = os.environ.get('ELASTICACHE_ALLOW_VPC_CIDR', 'false').lower() == 'true'
         if allow_vpc_cidr:
-            sg_description = "Security group for ElastiCache Redis - allows access from EC2 security groups and VPC CIDR"
+            sg_description = f"Security group for ElastiCache {engine.title()} - allows access from EC2 security groups and VPC CIDR"
         else:
-            sg_description = "Security group for ElastiCache Redis - allows access from specific EC2 security groups only"
+            sg_description = f"Security group for ElastiCache {engine.title()} - allows access from specific EC2 security groups only"
 
         try:
             # Create security group
@@ -322,25 +322,25 @@ class ElastiCacheProvisioner:
             sg_id = response['GroupId']
             print(f"✅ Created security group: {sg_id}")
 
-            # Add inbound rule for Redis port (6379) from source security groups
+            # Add inbound rule for cache port from source security groups
             for source_sg in source_security_groups:
                 self.ec2_client.authorize_security_group_ingress(
                     GroupId=sg_id,
                     IpPermissions=[
                         {
                             'IpProtocol': 'tcp',
-                            'FromPort': 6379,
-                            'ToPort': 6379,
+                            'FromPort': port,
+                            'ToPort': port,
                             'UserIdGroupPairs': [
                                 {
                                     'GroupId': source_sg,
-                                    'Description': f'Redis access from EC2 security group {source_sg}'
+                                    'Description': f'{engine.title()} access from EC2 security group {source_sg}'
                                 }
                             ]
                         }
                     ]
                 )
-                print(f"✅ Added inbound rule for Redis port 6379 from SG {source_sg}")
+                print(f"✅ Added inbound rule for {engine.title()} port {port} from SG {source_sg}")
 
             # Optionally add inbound rule from VPC CIDR for broader access within VPC
             # This is gated behind an explicit opt-in to honor least privilege principle
@@ -366,14 +366,14 @@ class ElastiCacheProvisioner:
                     for cidr in cidr_blocks:
                         ip_ranges.append({
                             'CidrIp': cidr,
-                            'Description': f'Redis access from VPC CIDR {cidr}'
+                            'Description': f'{engine.title()} access from VPC CIDR {cidr}'
                         })
 
                     # Build IpPermissions with proper structure
                     ip_permissions = {
                         'IpProtocol': 'tcp',
-                        'FromPort': 6379,
-                        'ToPort': 6379,
+                        'FromPort': port,
+                        'ToPort': port,
                         'IpRanges': ip_ranges
                     }
 
@@ -385,7 +385,7 @@ class ElastiCacheProvisioner:
                             if ipv6_cidr:
                                 ipv6_ranges.append({
                                     'CidrIpv6': ipv6_cidr,
-                                    'Description': f'Redis access from VPC IPv6 CIDR {ipv6_cidr}'
+                                    'Description': f'{engine.title()} access from VPC IPv6 CIDR {ipv6_cidr}'
                                 })
 
                     if ipv6_ranges:
@@ -396,7 +396,7 @@ class ElastiCacheProvisioner:
                         IpPermissions=[ip_permissions]
                     )
 
-                    print(f"✅ Added inbound rules for Redis port 6379 from VPC CIDRs:")
+                    print(f"✅ Added inbound rules for {engine.title()} port {port} from VPC CIDRs:")
                     for cidr in cidr_blocks:
                         print(f"   📍 IPv4: {cidr}")
                     for ipv6_range in ipv6_ranges:
@@ -414,10 +414,11 @@ class ElastiCacheProvisioner:
             self.ec2_client.create_tags(
                 Resources=[sg_id],
                 Tags=[
-                    {'Key': 'Name', 'Value': f'ElastiCache-Redis-{sg_name}'},
-                    {'Key': 'Purpose', 'Value': 'ElastiCache Redis Access'},
+                    {'Key': 'Name', 'Value': f'ElastiCache-{engine.title()}-{sg_name}'},
+                    {'Key': 'Purpose', 'Value': f'ElastiCache {engine.title()} Access'},
                     {'Key': 'AccessScope', 'Value': access_scope},
-                    {'Key': 'CreatedBy', 'Value': 'Migration-Tool'}
+                    {'Key': 'CreatedBy', 'Value': 'Migration-Tool'},
+                    {'Key': 'Engine', 'Value': engine}
                 ]
             )
 
@@ -492,6 +493,43 @@ class ElastiCacheProvisioner:
             result = self.create_elasticache_cluster_fallback(cache_name, security_group_id, subnet_group_name)
             if result:
                 return {'name': result, 'type': 'cluster'}
+            return None
+
+    def create_elasticache_cluster(self, cluster_id, security_group_id, subnet_group_name,
+                                 engine='redis', node_type='cache.t3.micro', engine_version='7.1'):
+        """Create ElastiCache cluster (Redis OSS or Valkey)."""
+        try:
+            print(f"🚀 Creating ElastiCache {engine.title()} cluster: {cluster_id}")
+            print(f"📍 Engine: {engine.title()}")
+            print(f"📍 Node Type: {node_type}")
+            print(f"📍 Engine Version: {engine_version}")
+
+            # Determine port based on engine
+            port = 6379 if engine == 'redis' else 6379  # Both use same port
+
+            response = self.elasticache_client.create_cache_cluster(
+                CacheClusterId=cluster_id,
+                Engine=engine,
+                EngineVersion=engine_version,
+                CacheNodeType=node_type,
+                NumCacheNodes=1,
+                Port=port,
+                CacheSubnetGroupName=subnet_group_name,
+                SecurityGroupIds=[security_group_id],
+                Tags=[
+                    {'Key': 'Name', 'Value': f'{engine.title()}-ElastiCache'},
+                    {'Key': 'Purpose', 'Value': 'Migration Testing'},
+                    {'Key': 'CreatedBy', 'Value': 'Migration-Tool'},
+                    {'Key': 'Environment', 'Value': 'Development'},
+                    {'Key': 'Engine', 'Value': engine}
+                ]
+            )
+
+            print(f"✅ ElastiCache {engine.title()} cluster creation initiated: {cluster_id}")
+            return {'name': cluster_id, 'type': 'cluster', 'engine': engine}
+
+        except Exception as e:
+            print(f"❌ Failed to create ElastiCache {engine.title()} cluster: {e}")
             return None
 
     def create_elasticache_cluster_fallback(self, cluster_id, security_group_id, subnet_group_name,
@@ -929,21 +967,71 @@ class ElastiCacheProvisioner:
             print(f"   📍 Environment: ELASTICACHE_ALLOW_VPC_CIDR=false (default)")
             print(f"   💡 To enable VPC-wide access: export ELASTICACHE_ALLOW_VPC_CIDR=true")
 
+    def get_engine_selection(self):
+        """Interactive engine and type selection."""
+        print("\n🔧 ElastiCache Engine Selection")
+        print("=" * 40)
+        print("Choose your ElastiCache engine and type:")
+        print()
+        print("1. 🔥 Valkey (Open source Redis fork)")
+        print("2. 📦 Redis OSS - Serverless (Auto-scaling, pay-per-use)")
+        print("3. 🖥️  Redis OSS - Node-based (Traditional clusters)")
+        print()
+
+        while True:
+            choice = input("Enter your choice (1-3): ").strip()
+
+            if choice == '1':
+                return {
+                    'engine': 'valkey',
+                    'type': 'cluster',
+                    'description': 'Valkey (Open source Redis fork)'
+                }
+            elif choice == '2':
+                return {
+                    'engine': 'redis',
+                    'type': 'serverless',
+                    'description': 'Redis OSS Serverless'
+                }
+            elif choice == '3':
+                return {
+                    'engine': 'redis',
+                    'type': 'cluster',
+                    'description': 'Redis OSS Node-based'
+                }
+            else:
+                print("❌ Invalid choice. Please enter 1, 2, or 3.")
+
     def provision_elasticache(self, config=None, interactive=True):
         """Main method to provision ElastiCache with proper configuration."""
-        print("🚀 Starting ElastiCache Redis provisioning...")
+        print("🚀 Starting ElastiCache provisioning...")
         print("=" * 60)
+
+        # Get engine selection
+        if interactive:
+            engine_config = self.get_engine_selection()
+        else:
+            # Default to Redis OSS Serverless for non-interactive
+            engine_config = {
+                'engine': 'redis',
+                'type': 'serverless',
+                'description': 'Redis OSS Serverless (default)'
+            }
+
+        print(f"\n✅ Selected: {engine_config['description']}")
 
         # Get configuration
         if config is None:
             if interactive:
-                print("🔧 Let's configure your ElastiCache instance...")
+                print("\n🔧 Let's configure your ElastiCache instance...")
                 config = interactive_config_builder()
             else:
                 config = get_recommended_config('development')
                 print(f"📋 Using default development configuration")
 
         print(f"\n📋 Configuration Summary:")
+        print(f"   Engine: {engine_config['engine'].title()}")
+        print(f"   Type: {engine_config['type'].title()}")
         print(f"   Node Type: {config['node_type']}")
         print(f"   Engine Version: {config['engine_version']}")
         print(f"   Port: {config['port']}")
@@ -1016,7 +1104,8 @@ class ElastiCacheProvisioner:
 
         # Step 3: Create security group
         print(f"\n3️⃣  Creating security group with appropriate access rules...")
-        security_group_id = self.create_security_group(vpc_id, source_security_groups)
+        port = config.get('port', 6379)
+        security_group_id = self.create_security_group(vpc_id, source_security_groups, engine_config['engine'], port)
         if not security_group_id:
             return False
         print(f"   ✅ Security group created: {security_group_id}")
@@ -1028,18 +1117,30 @@ class ElastiCacheProvisioner:
             return False
         print(f"   ✅ Subnet group created: {subnet_group_name}")
 
-        # Step 5: Create ElastiCache (Serverless by default)
-        cache_name = "Source-ElastiCache"
+        # Step 5: Create ElastiCache based on engine selection
+        cache_name = f"{engine_config['engine']}-elasticache-{int(time.time())}"
         print(f"\n5️⃣  Provisioning ElastiCache instance (this may take several minutes)...")
         print(f"   📍 Cache name: {cache_name}")
-        print(f"   📍 Type: Serverless (with cluster fallback)")
+        print(f"   📍 Engine: {engine_config['engine'].title()}")
+        print(f"   📍 Type: {engine_config['type'].title()}")
 
-        # Try serverless first, fallback to cluster if needed
-        created_cache_result = self.create_elasticache_serverless(
-            cache_name,
-            security_group_id,
-            subnet_group_name
-        )
+        # Create ElastiCache based on selected type
+        if engine_config['type'] == 'serverless' and engine_config['engine'] == 'redis':
+            created_cache_result = self.create_elasticache_serverless(
+                cache_name,
+                security_group_id,
+                subnet_group_name
+            )
+        else:
+            # Create node-based cluster (Redis OSS or Valkey)
+            created_cache_result = self.create_elasticache_cluster(
+                cache_name,
+                security_group_id,
+                subnet_group_name,
+                engine_config['engine'],
+                config['node_type'],
+                config['engine_version']
+            )
 
         if not created_cache_result:
             return False
