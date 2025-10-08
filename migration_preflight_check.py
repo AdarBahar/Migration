@@ -15,6 +15,7 @@ Version: 1.0.0
 import argparse
 import boto3
 import json
+import os
 import socket
 import ssl
 import sys
@@ -40,14 +41,20 @@ class CheckResult:
 
 class MigrationPreflightChecker:
     """Comprehensive pre-flight checker for RIOT-X migration CloudFormation template."""
-    
-    def __init__(self, source_cluster_id: str, target_redis_uri: str, 
-                 region: Optional[str] = None, verbose: bool = False):
+
+    def __init__(self, source_cluster_id: Optional[str] = None, target_redis_uri: Optional[str] = None,
+                 region: Optional[str] = None, verbose: bool = False, env_file: str = '.env'):
         """Initialize the pre-flight checker."""
-        self.source_cluster_id = source_cluster_id
-        self.target_redis_uri = target_redis_uri
         self.verbose = verbose
         self.results: List[CheckResult] = []
+        self.env_file = env_file
+
+        # Load configuration from .env file if available
+        self.env_config = self.load_env_config()
+
+        # Use provided parameters or fall back to .env configuration
+        self.source_cluster_id = source_cluster_id or self.get_source_cluster_from_env()
+        self.target_redis_uri = target_redis_uri or self.build_target_uri_from_env()
         
         # Initialize AWS clients
         self.session = boto3.Session(region_name=region)
@@ -68,6 +75,124 @@ class MigrationPreflightChecker:
         # Cache for discovered resources
         self.elasticache_details = None
         self.vpc_details = None
+
+    def load_env_config(self) -> Dict[str, str]:
+        """Load configuration from .env file."""
+        config = {}
+
+        if not os.path.exists(self.env_file):
+            return config
+
+        try:
+            with open(self.env_file, 'r') as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith('#') and '=' in line:
+                        key, value = line.split('=', 1)
+                        # Remove quotes if present
+                        value = value.strip().strip('\'"')
+                        config[key.strip()] = value
+
+            if self.verbose:
+                print(f"ℹ️  Loaded {len(config)} configuration items from {self.env_file}")
+
+        except Exception as e:
+            if self.verbose:
+                print(f"⚠️  Could not load {self.env_file}: {e}")
+
+        return config
+
+    def get_source_cluster_from_env(self) -> Optional[str]:
+        """Extract source cluster ID from .env configuration."""
+        # Check for explicit cluster ID first
+        cluster_id = self.env_config.get('ELASTICACHE_CLUSTER_ID') or self.env_config.get('SOURCE_CLUSTER_ID')
+        if cluster_id:
+            return cluster_id
+
+        # Try to extract from Redis source host (ElastiCache format)
+        source_host = self.env_config.get('REDIS_SOURCE_HOST')
+        if source_host and '.cache.amazonaws.com' in source_host:
+            # Extract cluster ID from ElastiCache hostname
+            # Format: cluster-id.xxxxx.cache.amazonaws.com
+            cluster_id = source_host.split('.')[0]
+            if self.verbose:
+                print(f"ℹ️  Extracted cluster ID '{cluster_id}' from REDIS_SOURCE_HOST")
+            return cluster_id
+
+        return None
+
+    def build_target_uri_from_env(self) -> Optional[str]:
+        """Build target Redis URI from .env configuration."""
+        host = self.env_config.get('REDIS_DEST_HOST')
+        port = self.env_config.get('REDIS_DEST_PORT', '6379')
+        password = self.env_config.get('REDIS_DEST_PASSWORD', '')
+        tls = self.env_config.get('REDIS_DEST_TLS', 'false').lower() == 'true'
+
+        if not host:
+            return None
+
+        # Build URI
+        scheme = 'rediss' if tls else 'redis'
+        auth_part = f":{password}@" if password else ""
+        uri = f"{scheme}://{auth_part}{host}:{port}"
+
+        if self.verbose:
+            # Mask password in verbose output
+            display_uri = f"{scheme}://***@{host}:{port}" if password else uri
+            print(f"ℹ️  Built target URI from .env: {display_uri}")
+
+        return uri
+
+    def check_configuration_source(self) -> CheckResult:
+        """Check and validate configuration source."""
+        config_details = {}
+
+        if self.env_config:
+            config_details['env_file'] = self.env_file
+            config_details['env_vars_found'] = len(self.env_config)
+
+            # Check what configuration was found
+            source_config = []
+            if self.env_config.get('ELASTICACHE_CLUSTER_ID'):
+                source_config.append('ELASTICACHE_CLUSTER_ID')
+            if self.env_config.get('REDIS_SOURCE_HOST'):
+                source_config.append('REDIS_SOURCE_HOST')
+
+            target_config = []
+            for var in ['REDIS_DEST_HOST', 'REDIS_DEST_PORT', 'REDIS_DEST_PASSWORD', 'REDIS_DEST_TLS']:
+                if self.env_config.get(var):
+                    target_config.append(var)
+
+            config_details['source_vars'] = source_config
+            config_details['target_vars'] = target_config
+
+            if source_config and target_config:
+                return CheckResult(
+                    name="Configuration Source",
+                    status=CheckStatus.PASS,
+                    message=f"Configuration loaded from {self.env_file}",
+                    details=config_details
+                )
+            else:
+                missing = []
+                if not source_config:
+                    missing.append("source (ELASTICACHE_CLUSTER_ID or REDIS_SOURCE_HOST)")
+                if not target_config:
+                    missing.append("target (REDIS_DEST_* variables)")
+
+                return CheckResult(
+                    name="Configuration Source",
+                    status=CheckStatus.WARN,
+                    message=f"Partial configuration in {self.env_file}, missing: {', '.join(missing)}",
+                    details=config_details
+                )
+        else:
+            return CheckResult(
+                name="Configuration Source",
+                status=CheckStatus.INFO,
+                message="Using command line parameters (no .env file found)",
+                details={'env_file': self.env_file, 'exists': False}
+            )
         
     def log_info(self, message: str):
         """Log info message."""
@@ -643,39 +768,64 @@ class MigrationPreflightChecker:
         """Run all pre-flight checks and return overall success status."""
         print("🚀 RIOT-X Migration Pre-flight Checker")
         print("=" * 50)
+
+        # Show configuration source
+        if self.env_config:
+            print(f"📁 Configuration: Loaded from {self.env_file}")
+        else:
+            print("📁 Configuration: Command line parameters")
+
         print(f"Source Cluster: {self.source_cluster_id}")
-        print(f"Target URI: {self.target_redis_uri}")
+
+        # Mask password in target URI for display
+        display_uri = self.target_redis_uri
+        if '@' in display_uri and ':' in display_uri:
+            parts = display_uri.split('@')
+            if len(parts) == 2:
+                scheme_and_auth = parts[0]
+                host_and_port = parts[1]
+                if ':' in scheme_and_auth:
+                    scheme_part = scheme_and_auth.split('://')[0] + '://'
+                    auth_part = scheme_and_auth.split('://')[1]
+                    if ':' in auth_part:
+                        user = auth_part.split(':')[0]
+                        display_uri = f"{scheme_part}{user}:***@{host_and_port}"
+
+        print(f"Target URI: {display_uri}")
         print(f"Region: {self.region}")
         print("=" * 50)
 
         # Run checks in logical order
-        print("\n📋 1. AWS Credentials & Basic Access")
+        print("\n📋 1. Configuration Source")
+        self.add_result(self.check_configuration_source())
+
+        print("\n📋 2. AWS Credentials & Basic Access")
         self.add_result(self.check_aws_credentials())
 
-        print("\n📋 2. IAM Permissions")
+        print("\n📋 3. IAM Permissions")
         iam_results = self.check_iam_permissions()
         for result in iam_results:
             self.add_result(result)
 
-        print("\n📋 3. ElastiCache Discovery")
+        print("\n📋 4. ElastiCache Discovery")
         self.add_result(self.discover_elasticache_cluster())
 
-        print("\n📋 4. VPC & Network Discovery")
+        print("\n📋 5. VPC & Network Discovery")
         self.add_result(self.discover_vpc_details())
 
-        print("\n📋 5. Internet Connectivity")
+        print("\n📋 6. Internet Connectivity")
         self.add_result(self.check_internet_connectivity())
 
-        print("\n📋 6. Target Redis Validation")
+        print("\n📋 7. Target Redis Validation")
         self.add_result(self.parse_target_redis_uri())
         self.add_result(self.test_target_connectivity())
 
-        print("\n📋 7. ECS Prerequisites")
+        print("\n📋 8. ECS Prerequisites")
         ecs_results = self.check_ecs_prerequisites()
         for result in ecs_results:
             self.add_result(result)
 
-        print("\n📋 8. CloudFormation Permissions")
+        print("\n📋 9. CloudFormation Permissions")
         self.add_result(self.check_cloudformation_permissions())
 
         # Generate summary
@@ -718,26 +868,44 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
+  # Use configuration from .env file (recommended)
+  python3 migration_preflight_check.py
+
+  # Override specific parameters
+  python3 migration_preflight_check.py --source-cluster my-cluster --verbose
+
+  # Use command line parameters only
   python3 migration_preflight_check.py --source-cluster my-redis-cluster --target-uri redis://user:pass@redis-cloud.com:6379
-  python3 migration_preflight_check.py --source-cluster my-cluster --target-uri rediss://redis-cloud.com:6380 --region us-west-2 --verbose
+
+  # With custom .env file location
+  python3 migration_preflight_check.py --env-file /path/to/custom.env --region us-west-2 --verbose
+
+.env Configuration:
+  The script automatically reads configuration from .env file with these variables:
+  - ELASTICACHE_CLUSTER_ID or REDIS_SOURCE_HOST (for source cluster)
+  - REDIS_DEST_HOST, REDIS_DEST_PORT, REDIS_DEST_PASSWORD, REDIS_DEST_TLS (for target)
         """
     )
 
     parser.add_argument(
         '--source-cluster',
-        required=True,
-        help='Source ElastiCache cluster ID or replication group ID'
+        help='Source ElastiCache cluster ID or replication group ID (optional if configured in .env)'
     )
 
     parser.add_argument(
         '--target-uri',
-        required=True,
-        help='Target Redis Cloud URI (redis://[user:pass@]host:port or rediss://[user:pass@]host:port)'
+        help='Target Redis Cloud URI (redis://[user:pass@]host:port or rediss://[user:pass@]host:port) (optional if configured in .env)'
     )
 
     parser.add_argument(
         '--region',
         help='AWS region (default: from AWS config)'
+    )
+
+    parser.add_argument(
+        '--env-file',
+        default='.env',
+        help='Path to .env configuration file (default: .env)'
     )
 
     parser.add_argument(
@@ -748,13 +916,25 @@ Examples:
 
     args = parser.parse_args()
 
-    # Run pre-flight checks
+    # Initialize checker (will load from .env if parameters not provided)
     checker = MigrationPreflightChecker(
         source_cluster_id=args.source_cluster,
         target_redis_uri=args.target_uri,
         region=args.region,
-        verbose=args.verbose
+        verbose=args.verbose,
+        env_file=args.env_file
     )
+
+    # Validate that we have required configuration
+    if not checker.source_cluster_id:
+        print("❌ Error: Source cluster ID not provided and not found in .env file")
+        print("   Either provide --source-cluster or configure ELASTICACHE_CLUSTER_ID/REDIS_SOURCE_HOST in .env")
+        sys.exit(1)
+
+    if not checker.target_redis_uri:
+        print("❌ Error: Target Redis URI not provided and not found in .env file")
+        print("   Either provide --target-uri or configure REDIS_DEST_* variables in .env")
+        sys.exit(1)
 
     success = checker.run_all_checks()
 

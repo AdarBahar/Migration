@@ -15,7 +15,18 @@ This script validates all prerequisites for the RIOT-X CloudFormation template t
 
 ## 🚀 Quick Start
 
-### Basic Usage
+### Recommended: Use .env Configuration
+
+```bash
+# 1. Configure your .env file (see .env.migration example)
+cp .env.migration .env
+# Edit .env with your actual cluster ID and Redis Cloud details
+
+# 2. Run pre-flight check
+python3 migration_preflight_check.py
+```
+
+### Alternative: Command Line Parameters
 
 ```bash
 python3 migration_preflight_check.py \
@@ -23,64 +34,111 @@ python3 migration_preflight_check.py \
   --target-uri redis://username:password@redis-cloud.com:6379
 ```
 
-### With TLS Target
+### With Verbose Output
 
 ```bash
-python3 migration_preflight_check.py \
-  --source-cluster my-cluster \
-  --target-uri rediss://username:password@redis-cloud.com:6380 \
-  --region us-west-2 \
-  --verbose
+python3 migration_preflight_check.py --verbose
 ```
 
 ## 📋 Command Line Options
 
 | Option | Required | Description |
 |--------|----------|-------------|
-| `--source-cluster` | ✅ | ElastiCache cluster ID or replication group ID |
-| `--target-uri` | ✅ | Target Redis Cloud URI (redis:// or rediss://) |
+| `--source-cluster` | ❌* | ElastiCache cluster ID or replication group ID |
+| `--target-uri` | ❌* | Target Redis Cloud URI (redis:// or rediss://) |
 | `--region` | ❌ | AWS region (defaults to AWS config) |
+| `--env-file` | ❌ | Path to .env configuration file (default: .env) |
 | `--verbose` | ❌ | Enable detailed output with additional information |
+
+*Required only if not configured in .env file
 
 ## 🔍 What It Checks
 
-### 1. AWS Credentials & Basic Access
+### 1. Configuration Source
+- Validates .env file loading and parsing
+- Shows which configuration variables were found
+- Identifies missing required configuration
+
+### 2. AWS Credentials & Basic Access
 - Validates AWS credentials are configured
 - Verifies STS access and identity
 
-### 2. IAM Permissions
+### 3. IAM Permissions
 Tests all required permissions for CloudFormation template:
 - **ElastiCache**: DescribeCacheClusters, DescribeReplicationGroups, DescribeServerlessCaches
 - **EC2**: DescribeVpcs, DescribeSubnets, DescribeSecurityGroups, DescribeRouteTables
 - **ECS**: DescribeClusters, ListClusters
 - **CloudFormation**: CreateStack, DescribeStacks
 
-### 3. ElastiCache Discovery
+### 4. ElastiCache Discovery
 - Discovers source cluster (replication group, single cluster, or serverless)
 - Extracts endpoint, port, VPC, subnets, and security groups
 - Validates cluster accessibility and configuration
 
-### 4. VPC & Network Discovery
+### 5. VPC & Network Discovery
 - Discovers VPC details from ElastiCache configuration
 - Identifies subnets and security groups
 - Validates network configuration
 
-### 5. Internet Connectivity
+### 6. Internet Connectivity
 - Checks for Internet Gateway in VPC
 - Validates default route for container image downloads
 - Identifies if CloudFormation will need to create connectivity
 
-### 6. Target Redis Validation
-- Parses target Redis URI format
+### 7. Target Redis Validation
+- Parses target Redis URI format (built from .env or provided directly)
 - Tests TCP/TLS connectivity to target
 - Validates hostname resolution
 
-### 7. ECS Prerequisites
+### 8. ECS Prerequisites
 - Verifies ECS service availability in region
 - Checks Fargate capacity provider access
 
-### 8. CloudFormation Permissions
+### 9. CloudFormation Permissions
 - Validates CloudFormation stack creation permissions
+
+## ⚙️ .env Configuration
+
+The script automatically reads configuration from a `.env` file, making it much easier to use. Copy `.env.migration` to `.env` and configure:
+
+### Required Variables
+
+```bash
+# Source ElastiCache (choose one)
+ELASTICACHE_CLUSTER_ID=my-elasticache-cluster
+# OR
+REDIS_SOURCE_HOST=my-cluster.abc123.cache.amazonaws.com
+
+# Target Redis Cloud
+REDIS_DEST_HOST=redis-15678.c123.eu-west-1-2.ec2.redns.redis-cloud.com
+REDIS_DEST_PORT=15678
+REDIS_DEST_PASSWORD=your-redis-cloud-password
+REDIS_DEST_TLS=true
+```
+
+### Optional Variables
+
+```bash
+# Additional Redis settings
+REDIS_SOURCE_PORT=6379
+REDIS_SOURCE_PASSWORD=
+REDIS_SOURCE_TLS=false
+REDIS_SOURCE_DB=0
+REDIS_DEST_DB=0
+REDIS_TIMEOUT=5
+LOG_LEVEL=INFO
+
+# AWS settings (uses AWS CLI defaults if not specified)
+AWS_REGION=us-east-1
+AWS_PROFILE=default
+```
+
+### Benefits of .env Configuration
+
+- ✅ **No command-line parameters needed** - just run `python3 migration_preflight_check.py`
+- ✅ **Secure password handling** - passwords stay in .env file (add to .gitignore)
+- ✅ **Consistent configuration** - same settings for pre-flight check and actual migration
+- ✅ **Easy to share** - team members can use same configuration template
 
 ## 📊 Output Format
 
@@ -88,29 +146,33 @@ Tests all required permissions for CloudFormation template:
 ```
 🚀 RIOT-X Migration Pre-flight Checker
 ==================================================
+📁 Configuration: Loaded from .env
 Source Cluster: my-redis-cluster
-Target URI: redis://user:***@redis-cloud.com:6379
+Target URI: rediss://***@redis-cloud.com:15678
 Region: us-east-1
 ==================================================
 
-📋 1. AWS Credentials & Basic Access
+📋 1. Configuration Source
+✅ Configuration Source: Configuration loaded from .env
+
+📋 2. AWS Credentials & Basic Access
 ✅ AWS Credentials: Valid credentials for arn:aws:iam::123456789012:user/migration-user
 
-📋 2. IAM Permissions
+📋 3. IAM Permissions
 ✅ IAM Permission: DescribeCacheClusters: Permission verified for elasticache:DescribeCacheClusters
 ✅ IAM Permission: DescribeReplicationGroups: Permission verified for elasticache:DescribeReplicationGroups
 ...
 
-📋 3. ElastiCache Discovery
+📋 4. ElastiCache Discovery
 ✅ ElastiCache Discovery: Found replication group: my-cluster.abc123.cache.amazonaws.com:6379
 
 ==================================================
 📊 SUMMARY
 ==================================================
-✅ Passed: 15
+✅ Passed: 16
 ❌ Failed: 0
 ⚠️  Warnings: 1
-📊 Total: 16
+📊 Total: 17
 
 🎉 SUCCESS: All critical checks passed!
 ✅ CloudFormation migration template should work successfully.
