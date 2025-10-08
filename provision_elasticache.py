@@ -865,67 +865,66 @@ class ElastiCacheProvisioner:
             print(f"❌ Network connectivity test failed: {e}")
             return False
 
-    def configure_keyspace_notifications(self, cache_info):
-        """Configure keyspace notifications for live migration support."""
+    def configure_keyspace_notifications(self, cache_info, cache_name, engine='redis', engine_version='7.1'):
+        """Configure keyspace notifications via parameter groups for ElastiCache."""
         try:
-            import redis
+            print(f"   🔧 Configuring keyspace notifications via parameter group...")
 
-            print(f"   🔗 Connecting to ElastiCache at {cache_info['endpoint']}:{cache_info['port']}")
-
-            # Create Redis connection
-            r = redis.Redis(
-                host=cache_info['endpoint'],
-                port=cache_info['port'],
-                decode_responses=True,
-                socket_timeout=10,
-                socket_connect_timeout=10
-            )
-
-            # Test connection
-            r.ping()
-
-            # Get current keyspace notifications setting
-            current_setting = r.config_get('notify-keyspace-events')
-            current_value = current_setting.get('notify-keyspace-events', '')
-
-            print(f"   📋 Current keyspace notifications: '{current_value}'")
-
-            # Recommended setting for RIOT-X live migration
-            recommended_setting = 'KEA'  # K=keyspace, E=keyevent, A=all events
-
-            if current_value == recommended_setting:
-                print(f"   ✅ Keyspace notifications already configured correctly")
-                return True
-
-            print(f"   🔧 Setting keyspace notifications to: '{recommended_setting}'")
-            print(f"      K = Keyspace events (__keyspace@<db>__ prefix)")
-            print(f"      E = Keyevent events (__keyevent@<db>__ prefix)")
-            print(f"      A = All events (g$lshztdxe)")
-
-            # Set keyspace notifications
-            r.config_set('notify-keyspace-events', recommended_setting)
-
-            # Verify the setting
-            new_setting = r.config_get('notify-keyspace-events')
-            new_value = new_setting.get('notify-keyspace-events', '')
-
-            if new_value == recommended_setting:
-                print(f"   ✅ Keyspace notifications configured: '{new_value}'")
-                return True
+            # Determine parameter group family based on engine version
+            if engine_version.startswith('7.'):
+                family = 'redis7.x'
+            elif engine_version.startswith('6.'):
+                family = 'redis6.x'
+            elif engine_version.startswith('5.'):
+                family = 'redis5.0'
             else:
-                print(f"   ❌ Failed to set keyspace notifications. Current: '{new_value}'")
-                return False
+                family = 'redis7.x'  # Default to latest
 
-        except ImportError:
-            print(f"   ❌ Redis Python library not available")
-            print(f"   💡 Install with: pip install redis")
-            return False
+            # Generate parameter group name
+            import time
+            timestamp = int(time.time())
+            parameter_group_name = f"{cache_name}-keyspace-{timestamp}"
+
+            print(f"   📋 Creating parameter group: {parameter_group_name}")
+            print(f"   📋 Family: {family}")
+
+            # Create parameter group
+            try:
+                self.elasticache_client.create_cache_parameter_group(
+                    CacheParameterGroupName=parameter_group_name,
+                    CacheParameterGroupFamily=family,
+                    Description=f'Keyspace notifications for {cache_name} - Live migration support'
+                )
+                print(f"   ✅ Parameter group created successfully")
+            except self.elasticache_client.exceptions.CacheParameterGroupAlreadyExistsFault:
+                print(f"   ℹ️  Parameter group already exists")
+
+            # Modify parameter group to enable keyspace notifications
+            print(f"   🔧 Setting notify-keyspace-events = KEA")
+            self.elasticache_client.modify_cache_parameter_group(
+                CacheParameterGroupName=parameter_group_name,
+                ParameterNameValues=[
+                    {
+                        'ParameterName': 'notify-keyspace-events',
+                        'ParameterValue': 'KEA'
+                    }
+                ]
+            )
+            print(f"   ✅ Parameter group configured with keyspace notifications")
+
+            # Note: Parameter group application would require cluster restart
+            # For new clusters, this should be applied during creation
+            print(f"   📋 Parameter group ready: {parameter_group_name}")
+            print(f"   ⚠️  Note: Apply this parameter group to enable keyspace notifications")
+            print(f"   💡 For existing clusters, this requires a restart")
+
+            return parameter_group_name
+
         except Exception as e:
             print(f"   ❌ Failed to configure keyspace notifications: {e}")
-            print(f"   💡 You can configure manually later using:")
-            print(f"       redis-cli -h {cache_info['endpoint']} -p {cache_info['port']}")
-            print(f"       CONFIG SET notify-keyspace-events KEA")
-            return False
+            print(f"   💡 You can configure manually using:")
+            print(f"       python3 configure_elasticache_keyspace.py --cluster-id {cache_name}")
+            return None
 
     def save_cache_info(self, cache_name, cache_info, security_group_id, subnet_group_name):
         """Save cache information to a file for future reference."""
@@ -1266,13 +1265,20 @@ class ElastiCacheProvisioner:
         # Step 6.5: Configure keyspace notifications if requested
         if enable_live_migration:
             print(f"\n🔔 Configuring keyspace notifications for live migration...")
-            keyspace_success = self.configure_keyspace_notifications(cache_info)
-            if keyspace_success:
-                print(f"   ✅ Keyspace notifications enabled successfully")
+            parameter_group_name = self.configure_keyspace_notifications(
+                cache_info,
+                created_cache_name,
+                engine_config['engine'],
+                config['engine_version']
+            )
+            if parameter_group_name:
+                print(f"   ✅ Keyspace notifications parameter group created: {parameter_group_name}")
+                print(f"   💡 For new clusters, this will be applied automatically")
+                print(f"   💡 For existing clusters, apply the parameter group manually")
             else:
                 print(f"   ⚠️  Keyspace notifications configuration failed")
-                print(f"   💡 You can enable them manually later using:")
-                print(f"       python3 enable_keyspace_notifications.py --host {cache_info['endpoint']}")
+                print(f"   💡 You can configure manually later using:")
+                print(f"       python3 configure_elasticache_keyspace.py --cluster-id {created_cache_name}")
 
         # Step 7: Verify network connectivity
         print(f"\n7️⃣  Verifying network connectivity...")

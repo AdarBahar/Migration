@@ -74,7 +74,7 @@ def enable_keyspace_notifications(host, port=6379, password=None, use_tls=False)
     """Enable keyspace notifications on Redis/ElastiCache."""
     try:
         print(f"🔗 Connecting to Redis at {host}:{port}")
-        
+
         # Create Redis connection
         r = redis.Redis(
             host=host,
@@ -85,47 +85,64 @@ def enable_keyspace_notifications(host, port=6379, password=None, use_tls=False)
             socket_timeout=10,
             socket_connect_timeout=10
         )
-        
+
         # Test connection
         r.ping()
         print("✅ Connected successfully")
-        
-        # Get current keyspace notifications setting
-        current_setting = r.config_get('notify-keyspace-events')
-        current_value = current_setting.get('notify-keyspace-events', '')
-        
-        print(f"\n📋 Current keyspace notifications: '{current_value}'")
-        
-        # Recommended setting for RIOT-X live migration
-        recommended_setting = 'KEA'  # K=keyspace, E=keyevent, A=all events
-        
-        if current_value == recommended_setting:
-            print(f"✅ Keyspace notifications already configured correctly: '{current_value}'")
-            return True
-        
-        print(f"\n🔧 Setting keyspace notifications to: '{recommended_setting}'")
-        print("   K = Keyspace events (published with __keyspace@<db>__ prefix)")
-        print("   E = Keyevent events (published with __keyevent@<db>__ prefix)")
-        print("   A = All events (alias for g$lshztdxe)")
-        
-        # Set keyspace notifications
-        r.config_set('notify-keyspace-events', recommended_setting)
-        
-        # Verify the setting
-        new_setting = r.config_get('notify-keyspace-events')
-        new_value = new_setting.get('notify-keyspace-events', '')
-        
-        if new_value == recommended_setting:
-            print(f"✅ Keyspace notifications enabled successfully: '{new_value}'")
-            print("\n🎉 Your ElastiCache cluster is now ready for RIOT-X live migration!")
-            print("\n📖 What this enables:")
-            print("   • Real-time key change notifications")
-            print("   • Live data synchronization during migration")
-            print("   • Minimal downtime migration capability")
-            return True
-        else:
-            print(f"❌ Failed to set keyspace notifications. Current: '{new_value}'")
-            return False
+
+        # Check if this is ElastiCache by testing CONFIG command availability
+        try:
+            # Get current keyspace notifications setting
+            current_setting = r.config_get('notify-keyspace-events')
+            current_value = current_setting.get('notify-keyspace-events', '')
+
+            print(f"\n📋 Current keyspace notifications: '{current_value}'")
+
+            # Recommended setting for RIOT-X live migration
+            recommended_setting = 'KEA'  # K=keyspace, E=keyevent, A=all events
+
+            if current_value == recommended_setting:
+                print(f"✅ Keyspace notifications already configured correctly: '{current_value}'")
+                return True
+
+            print(f"\n🔧 Setting keyspace notifications to: '{recommended_setting}'")
+            print("   K = Keyspace events (published with __keyspace@<db>__ prefix)")
+            print("   E = Keyevent events (published with __keyevent@<db>__ prefix)")
+            print("   A = All events (alias for g$lshztdxe)")
+
+            # Set keyspace notifications
+            r.config_set('notify-keyspace-events', recommended_setting)
+
+            # Verify the setting
+            new_setting = r.config_get('notify-keyspace-events')
+            new_value = new_setting.get('notify-keyspace-events', '')
+
+            if new_value == recommended_setting:
+                print(f"✅ Keyspace notifications enabled successfully: '{new_value}'")
+                print("\n🎉 Your Redis instance is now ready for RIOT-X live migration!")
+                print("\n📖 What this enables:")
+                print("   • Real-time key change notifications")
+                print("   • Live data synchronization during migration")
+                print("   • Minimal downtime migration capability")
+                return True
+            else:
+                print(f"❌ Failed to set keyspace notifications. Current: '{new_value}'")
+                return False
+
+        except redis.ResponseError as e:
+            if "unknown command" in str(e).lower() or "config" in str(e).lower():
+                print(f"\n❌ ElastiCache detected: CONFIG commands are restricted")
+                print(f"🔧 ElastiCache requires parameter groups to configure Redis settings")
+                print(f"\n💡 Use the ElastiCache parameter group configuration instead:")
+                print(f"   python3 configure_elasticache_keyspace.py --cluster-id YOUR_CLUSTER_ID")
+                print(f"\n📖 Or configure via AWS Console:")
+                print(f"   1. Go to ElastiCache → Parameter Groups")
+                print(f"   2. Create new parameter group or modify existing")
+                print(f"   3. Set notify-keyspace-events = KEA")
+                print(f"   4. Apply parameter group to your cluster")
+                return False
+            else:
+                raise e
             
     except redis.ConnectionError as e:
         print(f"❌ Connection failed: {e}")
