@@ -865,6 +865,68 @@ class ElastiCacheProvisioner:
             print(f"❌ Network connectivity test failed: {e}")
             return False
 
+    def configure_keyspace_notifications(self, cache_info):
+        """Configure keyspace notifications for live migration support."""
+        try:
+            import redis
+
+            print(f"   🔗 Connecting to ElastiCache at {cache_info['endpoint']}:{cache_info['port']}")
+
+            # Create Redis connection
+            r = redis.Redis(
+                host=cache_info['endpoint'],
+                port=cache_info['port'],
+                decode_responses=True,
+                socket_timeout=10,
+                socket_connect_timeout=10
+            )
+
+            # Test connection
+            r.ping()
+
+            # Get current keyspace notifications setting
+            current_setting = r.config_get('notify-keyspace-events')
+            current_value = current_setting.get('notify-keyspace-events', '')
+
+            print(f"   📋 Current keyspace notifications: '{current_value}'")
+
+            # Recommended setting for RIOT-X live migration
+            recommended_setting = 'KEA'  # K=keyspace, E=keyevent, A=all events
+
+            if current_value == recommended_setting:
+                print(f"   ✅ Keyspace notifications already configured correctly")
+                return True
+
+            print(f"   🔧 Setting keyspace notifications to: '{recommended_setting}'")
+            print(f"      K = Keyspace events (__keyspace@<db>__ prefix)")
+            print(f"      E = Keyevent events (__keyevent@<db>__ prefix)")
+            print(f"      A = All events (g$lshztdxe)")
+
+            # Set keyspace notifications
+            r.config_set('notify-keyspace-events', recommended_setting)
+
+            # Verify the setting
+            new_setting = r.config_get('notify-keyspace-events')
+            new_value = new_setting.get('notify-keyspace-events', '')
+
+            if new_value == recommended_setting:
+                print(f"   ✅ Keyspace notifications configured: '{new_value}'")
+                return True
+            else:
+                print(f"   ❌ Failed to set keyspace notifications. Current: '{new_value}'")
+                return False
+
+        except ImportError:
+            print(f"   ❌ Redis Python library not available")
+            print(f"   💡 Install with: pip install redis")
+            return False
+        except Exception as e:
+            print(f"   ❌ Failed to configure keyspace notifications: {e}")
+            print(f"   💡 You can configure manually later using:")
+            print(f"       redis-cli -h {cache_info['endpoint']} -p {cache_info['port']}")
+            print(f"       CONFIG SET notify-keyspace-events KEA")
+            return False
+
     def save_cache_info(self, cache_name, cache_info, security_group_id, subnet_group_name):
         """Save cache information to a file for future reference."""
         info = {
@@ -967,6 +1029,37 @@ class ElastiCacheProvisioner:
             print(f"   📍 Environment: ELASTICACHE_ALLOW_VPC_CIDR=false (default)")
             print(f"   💡 To enable VPC-wide access: export ELASTICACHE_ALLOW_VPC_CIDR=true")
 
+    def get_live_migration_preference(self):
+        """Ask user about live migration support (keyspace notifications)."""
+        print("\n🔔 Live Migration Support")
+        print("=" * 40)
+        print("RIOT-X supports live migration with minimal downtime using Redis keyspace notifications.")
+        print()
+        print("📖 What are keyspace notifications?")
+        print("   • Real-time notifications when keys are modified")
+        print("   • Enables live data synchronization during migration")
+        print("   • Minimal downtime migration capability")
+        print()
+        print("⚠️  Note: Keyspace notifications use some CPU power but enable advanced migration features")
+        print()
+
+        while True:
+            try:
+                choice = input("Enable keyspace notifications for live migration? (Y/n): ").strip().lower()
+
+                if choice in ('', 'y', 'yes'):
+                    print("✅ Keyspace notifications will be enabled for live migration support")
+                    return True
+                elif choice in ('n', 'no'):
+                    print("ℹ️  Keyspace notifications will be disabled (standard migration only)")
+                    return False
+                else:
+                    print("❌ Please enter 'y' for yes or 'n' for no")
+
+            except KeyboardInterrupt:
+                print("\n\n👋 Setup cancelled by user")
+                return None
+
     def get_engine_selection(self):
         """Interactive engine and type selection."""
         print("\n🔧 ElastiCache Engine Selection")
@@ -1007,6 +1100,13 @@ class ElastiCacheProvisioner:
         print("🚀 Starting ElastiCache provisioning...")
         print("=" * 60)
 
+        # Get live migration preference
+        enable_live_migration = False
+        if interactive:
+            enable_live_migration = self.get_live_migration_preference()
+            if enable_live_migration is None:
+                return False
+
         # Get engine selection
         if interactive:
             engine_config = self.get_engine_selection()
@@ -1019,6 +1119,8 @@ class ElastiCacheProvisioner:
             }
 
         print(f"\n✅ Selected: {engine_config['description']}")
+        if enable_live_migration:
+            print("✅ Live migration support: Enabled (keyspace notifications will be configured)")
 
         # Get configuration
         if config is None:
@@ -1160,6 +1262,17 @@ class ElastiCacheProvisioner:
         if not cache_info:
             print("❌ Cache did not become available within timeout period")
             return False
+
+        # Step 6.5: Configure keyspace notifications if requested
+        if enable_live_migration:
+            print(f"\n🔔 Configuring keyspace notifications for live migration...")
+            keyspace_success = self.configure_keyspace_notifications(cache_info)
+            if keyspace_success:
+                print(f"   ✅ Keyspace notifications enabled successfully")
+            else:
+                print(f"   ⚠️  Keyspace notifications configuration failed")
+                print(f"   💡 You can enable them manually later using:")
+                print(f"       python3 enable_keyspace_notifications.py --host {cache_info['endpoint']}")
 
         # Step 7: Verify network connectivity
         print(f"\n7️⃣  Verifying network connectivity...")
