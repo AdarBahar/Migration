@@ -56,25 +56,77 @@ class MigrationPreflightChecker:
         self.source_cluster_id = source_cluster_id or self.get_source_cluster_from_env()
         self.target_redis_uri = target_redis_uri or self.build_target_uri_from_env()
         
-        # Initialize AWS clients
+        # Initialize AWS clients with better region detection
         self.session = boto3.Session(region_name=region)
-        self.region = self.session.region_name or 'us-east-1'
+        self.region = self.get_aws_region(region)
         
         try:
-            self.elasticache_client = self.session.client('elasticache')
-            self.ec2_client = self.session.client('ec2')
-            self.ecs_client = self.session.client('ecs')
-            self.iam_client = self.session.client('iam')
-            self.logs_client = self.session.client('logs')
-            self.sts_client = self.session.client('sts')
-            self.cloudformation_client = self.session.client('cloudformation')
+            # Create a new session with the determined region
+            self.session = boto3.Session(region_name=self.region)
+
+            self.elasticache_client = self.session.client('elasticache', region_name=self.region)
+            self.ec2_client = self.session.client('ec2', region_name=self.region)
+            self.ecs_client = self.session.client('ecs', region_name=self.region)
+            self.iam_client = self.session.client('iam', region_name=self.region)
+            self.logs_client = self.session.client('logs', region_name=self.region)
+            self.sts_client = self.session.client('sts', region_name=self.region)
+            self.cloudformation_client = self.session.client('cloudformation', region_name=self.region)
+
+            if self.verbose:
+                print(f"ℹ️  Initialized AWS clients for region: {self.region}")
+
         except Exception as e:
             self.log_error(f"Failed to initialize AWS clients: {e}")
+            self.log_error(f"Region used: {self.region}")
+            self.log_error("Try setting AWS_DEFAULT_REGION environment variable or use --region parameter")
             sys.exit(1)
         
         # Cache for discovered resources
         self.elasticache_details = None
         self.vpc_details = None
+
+    def get_aws_region(self, provided_region: Optional[str] = None) -> str:
+        """Get AWS region from various sources with fallback logic."""
+        # 1. Use provided region parameter
+        if provided_region:
+            return provided_region
+
+        # 2. Try session region
+        if self.session.region_name:
+            return self.session.region_name
+
+        # 3. Try environment variables
+        region = os.environ.get('AWS_DEFAULT_REGION') or os.environ.get('AWS_REGION')
+        if region:
+            return region
+
+        # 4. Try .region file (from EC2 instance)
+        try:
+            if os.path.exists('.region'):
+                with open('.region', 'r') as f:
+                    region = f.read().strip()
+                    if region:
+                        return region
+        except Exception:
+            pass
+
+        # 5. Try .env configuration
+        region = self.env_config.get('AWS_REGION') or self.env_config.get('AWS_DEFAULT_REGION')
+        if region:
+            return region
+
+        # 6. Try to get from AWS CLI config
+        try:
+            import subprocess
+            result = subprocess.run(['aws', 'configure', 'get', 'region'],
+                                  capture_output=True, text=True, timeout=10)
+            if result.returncode == 0 and result.stdout.strip():
+                return result.stdout.strip()
+        except Exception:
+            pass
+
+        # 7. Default fallback
+        return 'us-east-1'
 
     def load_env_config(self) -> Dict[str, str]:
         """Load configuration from .env file."""
