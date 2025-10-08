@@ -1,0 +1,5 @@
+manage_env
+    source - I can paste the URL to get name and host
+    source-elasticache.nkwtpc.0001.eun1.cache.amazonaws.com
+    <      name.     >
+    <          host                                        >
