@@ -244,7 +244,6 @@ Resources:
                   - iam:GetRolePolicy
                   - iam:ListRolePolicies
                   - iam:ListAttachedRolePolicies
-                  - iam:PassRole
                   # Lambda permissions for CloudFormation custom resources
                   - lambda:CreateFunction
                   - lambda:DeleteFunction
@@ -266,6 +265,24 @@ Resources:
                 Condition:
                   StringEquals:
                     'aws:RequestedRegion': !Ref 'AWS::Region'
+        - PolicyName: SecurePassRolePolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - iam:PassRole
+                Resource:
+                  - !Sub 'arn:aws:iam::${AWS::AccountId}:role/riotx-*'
+                  - !Sub 'arn:aws:iam::${AWS::AccountId}:role/RIOT-X-*'
+                  - !Sub 'arn:aws:iam::${AWS::AccountId}:role/*-ECS-*'
+                  - !Sub 'arn:aws:iam::${AWS::AccountId}:role/*-Lambda-*'
+                Condition:
+                  StringEquals:
+                    'iam:PassedToService':
+                      - 'ecs-tasks.amazonaws.com'
+                      - 'lambda.amazonaws.com'
+                      - 'ecs.amazonaws.com'
 
   MigrationInstanceProfile:
     Type: AWS::IAM::InstanceProfile
