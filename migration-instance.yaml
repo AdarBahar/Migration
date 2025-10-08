@@ -200,11 +200,68 @@ Resources:
                   - ec2:DescribeNetworkInterfaces
                   - ec2:DescribeRouteTables
                   - ec2:DescribeNetworkAcls
+                  - ec2:DescribeInternetGateways
                   - ec2:AuthorizeSecurityGroupEgress
                   # ElastiCache connectivity diagnostics permissions
                   - elasticache:DescribeReplicationGroups
                   - elasticache:DescribeCacheClusters
                   - elasticache:DescribeCacheSubnetGroups
+                  - elasticache:DescribeServerlessCaches
+                  # ECS permissions for CloudFormation template
+                  - ecs:DescribeClusters
+                  - ecs:ListClusters
+                  - ecs:CreateCluster
+                  - ecs:CreateService
+                  - ecs:UpdateService
+                  - ecs:DeleteService
+                  - ecs:DeleteCluster
+                  - ecs:RegisterTaskDefinition
+                  - ecs:DeregisterTaskDefinition
+                  - ecs:DescribeTaskDefinition
+                  - ecs:DescribeServices
+                  - ecs:ListServices
+                  - ecs:RunTask
+                  - ecs:DescribeTasks
+                  - ecs:ListTasks
+                  - ecs:StopTask
+                  # CloudFormation permissions for RIOT-X template
+                  - cloudformation:CreateStack
+                  - cloudformation:UpdateStack
+                  - cloudformation:DeleteStack
+                  - cloudformation:DescribeStacks
+                  - cloudformation:DescribeStackEvents
+                  - cloudformation:DescribeStackResources
+                  - cloudformation:ListStacks
+                  - cloudformation:GetTemplate
+                  # IAM permissions for CloudFormation to create roles
+                  - iam:CreateRole
+                  - iam:DeleteRole
+                  - iam:AttachRolePolicy
+                  - iam:DetachRolePolicy
+                  - iam:PutRolePolicy
+                  - iam:DeleteRolePolicy
+                  - iam:GetRole
+                  - iam:GetRolePolicy
+                  - iam:ListRolePolicies
+                  - iam:ListAttachedRolePolicies
+                  - iam:PassRole
+                  # Lambda permissions for CloudFormation custom resources
+                  - lambda:CreateFunction
+                  - lambda:DeleteFunction
+                  - lambda:UpdateFunctionCode
+                  - lambda:UpdateFunctionConfiguration
+                  - lambda:GetFunction
+                  - lambda:InvokeFunction
+                  - lambda:ListFunctions
+                  - lambda:AddPermission
+                  - lambda:RemovePermission
+                  # CloudWatch Logs permissions
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                  - logs:DescribeLogGroups
+                  - logs:DescribeLogStreams
+                  - logs:GetLogEvents
                 Resource: '*'
                 Condition:
                   StringEquals:
