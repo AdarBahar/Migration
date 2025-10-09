@@ -8,10 +8,11 @@ import os
 import sys
 import json
 import redis
+import time
 from dotenv import load_dotenv
 from datetime import datetime
 from collections import defaultdict
-from input_utils import get_input, get_yes_no, print_header, print_section, pause
+from input_utils import get_input, get_yes_no, get_number, print_header, print_section, pause, clear_screen
 
 # Load environment variables
 ENV_PATH = ".env"
@@ -147,21 +148,50 @@ def get_database_info(connection):
         print(f"❌ Error getting database info: {e}")
         return info
 
-def compare_databases(db_infos):
-    """Compare multiple databases and show differences."""
+def compare_databases(db_infos, show_timestamp=False, previous_infos=None):
+    """Compare multiple databases and show differences.
+
+    Args:
+        db_infos: Current database information
+        show_timestamp: Whether to show timestamp in header
+        previous_infos: Previous comparison data for showing deltas
+    """
     print("\n" + "=" * 80)
-    print("📊 DATABASE COMPARISON RESULTS")
+    if show_timestamp:
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        print(f"📊 DATABASE COMPARISON RESULTS - {timestamp}")
+    else:
+        print("📊 DATABASE COMPARISON RESULTS")
     print("=" * 80)
 
     # Summary comparison
     print("\n📋 Summary:")
     print("-" * 80)
-    print(f"{'Database':<30} {'Total Keys':<15} {'Memory (bytes)':<20} {'Types'}")
+    if previous_infos:
+        print(f"{'Database':<30} {'Total Keys':<15} {'Change':<12} {'Memory (bytes)':<20} {'Types'}")
+    else:
+        print(f"{'Database':<30} {'Total Keys':<15} {'Memory (bytes)':<20} {'Types'}")
     print("-" * 80)
 
     for db_name, info in db_infos.items():
         types_str = ", ".join([f"{k}:{v}" for k, v in info['keys_by_type'].items()])
-        print(f"{db_name:<30} {info['total_keys']:<15} {info['memory_usage']:<20} {types_str}")
+
+        # Show delta if we have previous data
+        delta_str = ""
+        if previous_infos and db_name in previous_infos:
+            prev_count = previous_infos[db_name]['total_keys']
+            curr_count = info['total_keys']
+            delta = curr_count - prev_count
+            if delta > 0:
+                delta_str = f"🔼 +{delta}"
+            elif delta < 0:
+                delta_str = f"🔽 {delta}"
+            else:
+                delta_str = "➖ 0"
+
+            print(f"{db_name:<30} {info['total_keys']:<15} {delta_str:<12} {info['memory_usage']:<20} {types_str}")
+        else:
+            print(f"{db_name:<30} {info['total_keys']:<15} {info['memory_usage']:<20} {types_str}")
 
     # Key differences
     print("\n🔍 Key Differences:")
@@ -266,6 +296,88 @@ def select_databases_to_compare(all_databases):
             print("\n\n❌ Cancelled by user")
             return []
 
+def continuous_compare(selected_databases, cadence=5):
+    """Continuously compare databases at specified interval.
+
+    Args:
+        selected_databases: List of database configurations to compare
+        cadence: Seconds between comparisons (default: 5)
+    """
+    print(f"\n🔄 Starting continuous comparison mode (every {cadence} seconds)")
+    print("Press Ctrl+C to stop")
+    print("=" * 80)
+
+    iteration = 0
+    start_time = time.time()
+    previous_infos = None
+
+    elapsed = 0
+    try:
+        while True:
+            iteration += 1
+            elapsed = time.time() - start_time
+
+            # Clear screen for better readability
+            if iteration > 1:
+                clear_screen()
+
+            # Show iteration info
+            print("=" * 80)
+            print(f"🔄 Continuous Comparison - Iteration #{iteration}")
+            print(f"⏱️  Elapsed time: {int(elapsed // 60)}m {int(elapsed % 60)}s")
+            print(f"🔁 Refresh rate: {cadence} seconds")
+            print("=" * 80)
+
+            # Connect to databases and gather information
+            db_infos = {}
+            connections = {}
+
+            for db in selected_databases:
+                db_name = db['name']
+
+                try:
+                    # Reuse connection or create new one
+                    conn = connect_to_database(db)
+                    if not conn:
+                        print(f"❌ Failed to connect to {db_name}")
+                        continue
+
+                    connections[db_name] = conn
+
+                    # Get database info
+                    info = get_database_info(conn)
+                    db_infos[db_name] = info
+
+                except Exception as e:
+                    print(f"❌ Error analyzing {db_name}: {e}")
+                    continue
+
+            # Close connections
+            for conn in connections.values():
+                try:
+                    conn.close()
+                except:
+                    pass
+
+            if len(db_infos) < 2:
+                print("\n⚠️  Need at least 2 successfully connected databases")
+                print(f"Retrying in {cadence} seconds...")
+            else:
+                # Compare databases with delta information
+                compare_databases(db_infos, show_timestamp=True, previous_infos=previous_infos)
+
+                # Store current info for next iteration's delta
+                previous_infos = db_infos
+
+            # Wait for next iteration
+            print(f"\n⏳ Next update in {cadence} seconds... (Press Ctrl+C to stop)")
+            time.sleep(cadence)
+
+    except KeyboardInterrupt:
+        print("\n\n✅ Continuous comparison stopped by user")
+        print(f"📊 Total iterations: {iteration}")
+        print(f"⏱️  Total time: {int(elapsed // 60)}m {int(elapsed % 60)}s")
+
 def main():
     """Main function for database comparison."""
     print("=" * 80)
@@ -289,6 +401,31 @@ def main():
         print("\n❌ No databases selected for comparison")
         return
 
+    # Ask about comparison mode
+    print("\n" + "=" * 80)
+    print("📊 Comparison Mode")
+    print("=" * 80)
+    print("1. Single comparison (one-time)")
+    print("2. Continuous comparison (monitor changes)")
+    print()
+
+    mode_choice = get_input("Select mode [1-2]", default="1")
+
+    if mode_choice == '2':
+        # Continuous mode
+        print("\n🔄 Continuous Comparison Mode")
+        print("=" * 80)
+        cadence = get_number(
+            "Refresh interval in seconds",
+            min_val=1,
+            max_val=3600,
+            default=5
+        )
+
+        continuous_compare(selected_databases, cadence)
+        return
+
+    # Single comparison mode
     # Connect to databases and gather information
     print("\n🔌 Connecting to databases...")
     db_infos = {}
