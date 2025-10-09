@@ -489,14 +489,15 @@ def continuous_compare(selected_databases, cadence=5):
 
     elapsed = 0
 
-    # Hide cursor for cleaner display
-    print(HIDE_CURSOR, end='')
-    sys.stdout.flush()
-
     try:
         while True:
             iteration += 1
             elapsed = time.time() - start_time
+
+            # Hide cursor after first iteration (so we can see initial status messages)
+            if iteration == 2:
+                print(HIDE_CURSOR, end='')
+                sys.stdout.flush()
 
             # Move cursor back to start of dynamic content (after first iteration)
             if iteration > 1 and lines_printed > 0:
@@ -523,11 +524,23 @@ def continuous_compare(selected_databases, cadence=5):
                 db_name = db['name']
 
                 try:
+                    # Show status immediately (before hiding cursor on first iteration)
+                    if iteration == 1:
+                        print(f"📍 Connecting to {db_name}...")
+                        sys.stdout.flush()
+
                     # Reuse connection or create new one
                     conn = connect_to_database(db)
                     if not conn:
+                        if iteration == 1:
+                            print(f"❌ Failed to connect to {db_name}")
                         output_lines.append(f"❌ Failed to connect to {db_name}" + CLEAR_LINE)
                         continue
+
+                    if iteration == 1:
+                        print(f"✅ Connected to {db_name}")
+                        print(f"📊 Analyzing {db_name}...")
+                        sys.stdout.flush()
 
                     connections[db_name] = conn
 
@@ -535,7 +548,15 @@ def continuous_compare(selected_databases, cadence=5):
                     info = get_database_info(conn, show_progress=False)
                     db_infos[db_name] = info
 
+                    if iteration == 1:
+                        print(f"✅ Found {info['total_keys']} keys")
+                        sys.stdout.flush()
+
                 except Exception as e:
+                    if iteration == 1:
+                        print(f"❌ Error analyzing {db_name}: {e}")
+                        import traceback
+                        traceback.print_exc()
                     output_lines.append(f"❌ Error analyzing {db_name}: {e}" + CLEAR_LINE)
                     continue
 
@@ -562,6 +583,12 @@ def continuous_compare(selected_databases, cadence=5):
             # Status line
             output_lines.append("" + CLEAR_LINE)
             output_lines.append(f"⏳ Next update in {cadence} seconds... (Press Ctrl+C to stop)" + CLEAR_LINE)
+
+            # Add separator before starting fixed-position display (iteration 2+)
+            if iteration == 1:
+                print("\n" + "=" * 80)
+                print("Starting fixed-position display...")
+                print("=" * 80 + "\n")
 
             # Print all lines
             for line in output_lines:
