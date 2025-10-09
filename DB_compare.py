@@ -96,12 +96,13 @@ def connect_to_database(db_config):
         print(f"❌ Error: {e}")
         return None
 
-def get_database_info(connection, timeout=60):
+def get_database_info(connection, timeout=60, show_progress=True):
     """Get comprehensive information about a database.
 
     Args:
         connection: Redis/Valkey connection
         timeout: Maximum time in seconds to analyze the database (default: 60)
+        show_progress: Whether to show progress messages (default: True, disable for continuous mode)
 
     Returns:
         Dictionary with database information
@@ -126,9 +127,9 @@ def get_database_info(connection, timeout=60):
         info['total_keys'] = len(keys)
         info['keys'] = sorted(keys)
 
-        # Show progress for large databases
+        # Show progress for large databases (only if show_progress is True)
         total_keys = len(keys)
-        if total_keys > 1000:
+        if show_progress and total_keys > 1000:
             print(f"   ⏳ Analyzing {total_keys} keys (this may take a moment)...")
 
         # Analyze each key
@@ -170,8 +171,8 @@ def get_database_info(connection, timeout=60):
 
                 keys_processed += 1
 
-                # Show progress every 1000 keys
-                if total_keys > 1000 and keys_processed % 1000 == 0:
+                # Show progress every 1000 keys (only if show_progress is True)
+                if show_progress and total_keys > 1000 and keys_processed % 1000 == 0:
                     print(f"   📊 Progress: {keys_processed}/{total_keys} keys analyzed...")
 
             except Exception as e:
@@ -530,8 +531,8 @@ def continuous_compare(selected_databases, cadence=5):
 
                     connections[db_name] = conn
 
-                    # Get database info
-                    info = get_database_info(conn)
+                    # Get database info (disable progress messages for continuous mode)
+                    info = get_database_info(conn, show_progress=False)
                     db_infos[db_name] = info
 
                 except Exception as e:
