@@ -87,19 +87,19 @@ REDIS_ENGINE_VERSIONS = {
     }
 }
 
-# Valkey Engine Versions (Valkey uses different version numbers)
+# Valkey Engine Versions (AWS ElastiCache supported versions)
 VALKEY_ENGINE_VERSIONS = {
-    '7.2.5': {
-        'features': ['Valkey Functions', 'ACLs', 'Streams', 'JSON support'],
+    '8.1': {
+        'features': ['Valkey Functions', 'ACLs', 'Streams', 'JSON support', 'Latest features'],
         'recommended': True,
         'description': 'Latest Valkey version with enhanced features'
     },
-    '7.2.4': {
+    '8.0': {
         'features': ['Valkey Functions', 'ACLs', 'Streams', 'JSON support'],
         'recommended': False,
         'description': 'Stable Valkey version'
     },
-    '7.0.5': {
+    '7.2': {
         'features': ['ACLs', 'Streams', 'Enhanced performance'],
         'recommended': False,
         'description': 'Older stable Valkey version'
@@ -121,10 +121,10 @@ DEFAULT_CONFIG = {
 # Valkey-specific default configuration
 VALKEY_DEFAULT_CONFIG = {
     'node_type': 'cache.t3.micro',
-    'engine_version': '7.2.5',  # Latest supported Valkey version
+    'engine_version': '8.1',  # Latest AWS ElastiCache supported Valkey version
     'port': 6379,
     'num_cache_nodes': 1,
-    'parameter_group_family': 'valkey7.x',
+    'parameter_group_family': 'valkey8.x',  # Updated parameter group family
     'maintenance_window': 'sun:05:00-sun:06:00',
     'snapshot_retention_limit': 1,
     'snapshot_window': '03:00-04:00'
@@ -178,16 +178,26 @@ def display_node_type_options():
         print(f"   Cost: {specs['cost']}")
         print(f"   Use Case: {specs['use_case']}")
 
-def display_engine_versions():
-    """Display available Redis engine versions."""
-    print("\n🔧 Available Redis Engine Versions:")
-    print("=" * 50)
-    
-    for version, info in REDIS_ENGINE_VERSIONS.items():
-        recommended = " (RECOMMENDED)" if info['recommended'] else ""
-        print(f"\n📦 Redis {version}{recommended}")
-        print(f"   Description: {info['description']}")
-        print(f"   Features: {', '.join(info['features'])}")
+def display_engine_versions(engine='redis'):
+    """Display available engine versions for Redis or Valkey."""
+    if engine == 'valkey':
+        print("\n🔧 Available Valkey Engine Versions:")
+        print("=" * 50)
+
+        for version, info in VALKEY_ENGINE_VERSIONS.items():
+            recommended = " (RECOMMENDED)" if info['recommended'] else ""
+            print(f"\n📦 Valkey {version}{recommended}")
+            print(f"   Description: {info['description']}")
+            print(f"   Features: {', '.join(info['features'])}")
+    else:
+        print("\n🔧 Available Redis Engine Versions:")
+        print("=" * 50)
+
+        for version, info in REDIS_ENGINE_VERSIONS.items():
+            recommended = " (RECOMMENDED)" if info['recommended'] else ""
+            print(f"\n📦 Redis {version}{recommended}")
+            print(f"   Description: {info['description']}")
+            print(f"   Features: {', '.join(info['features'])}")
 
 def validate_node_type(node_type):
     """Validate if the node type is supported."""
@@ -263,12 +273,13 @@ def interactive_config_builder(engine='redis'):
         print(f"⚠️  Invalid node type, using default: {config['node_type']}")
     
     # Engine version selection
-    print("\n3. Redis Engine Version:")
-    display_engine_versions()
-    
+    engine_name = engine.title()
+    print(f"\n3. {engine_name} Engine Version:")
+    display_engine_versions(engine)
+
     engine_version = input(f"\nEnter engine version [{config['engine_version']}]: ").strip() or config['engine_version']
-    
-    if validate_engine_version(engine_version):
+
+    if validate_engine_version(engine_version, engine):
         config['engine_version'] = engine_version
     else:
         print(f"⚠️  Invalid engine version, using default: {config['engine_version']}")
