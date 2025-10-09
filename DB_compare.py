@@ -96,6 +96,39 @@ def connect_to_database(db_config):
         print(f"❌ Error: {e}")
         return None
 
+def get_database_key_count(connection):
+    """Get just the key count for a database (fast, for continuous monitoring).
+
+    Args:
+        connection: Redis/Valkey connection
+
+    Returns:
+        Dictionary with minimal database information (just key count and list)
+    """
+    info = {
+        'total_keys': 0,
+        'keys_by_type': defaultdict(int),
+        'memory_usage': 0,
+        'keys': [],
+        'sample_data': {},
+        'memory_estimated': False
+    }
+
+    try:
+        # Get all keys (fast operation)
+        keys = connection.keys('*')
+        info['total_keys'] = len(keys)
+        info['keys'] = sorted(keys)
+
+        # For continuous mode, we don't need type analysis or memory usage
+        # This makes it much faster
+
+        return info
+
+    except Exception as e:
+        print(f"❌ Error getting key count: {e}")
+        return info
+
 def get_database_info(connection, timeout=60, show_progress=True):
     """Get comprehensive information about a database.
 
@@ -249,12 +282,19 @@ def build_comparison_output(db_infos, previous_infos=None):
     lines.append("-" * 80)
 
     for db_name, info in db_infos.items():
-        types_str = ", ".join([f"{k}:{v}" for k, v in info['keys_by_type'].items()])
+        # Handle case where we don't have type information (lightweight mode)
+        if info['keys_by_type']:
+            types_str = ", ".join([f"{k}:{v}" for k, v in info['keys_by_type'].items()])
+        else:
+            types_str = "N/A"
 
         # Format memory with estimation indicator
-        memory_str = str(info['memory_usage'])
-        if info.get('memory_estimated', False):
-            memory_str += " (est.)"
+        if info['memory_usage'] > 0:
+            memory_str = str(info['memory_usage'])
+            if info.get('memory_estimated', False):
+                memory_str += " (est.)"
+        else:
+            memory_str = "N/A"
 
         # Show delta if we have previous data
         delta_str = ""
@@ -539,13 +579,13 @@ def continuous_compare(selected_databases, cadence=5):
 
                     if iteration == 1:
                         print(f"✅ Connected to {db_name}")
-                        print(f"📊 Analyzing {db_name}...")
+                        print(f"📊 Counting keys in {db_name}...")
                         sys.stdout.flush()
 
                     connections[db_name] = conn
 
-                    # Get database info (disable progress messages for continuous mode)
-                    info = get_database_info(conn, show_progress=False)
+                    # Use lightweight key count for continuous mode (much faster)
+                    info = get_database_key_count(conn)
                     db_infos[db_name] = info
 
                     if iteration == 1:
