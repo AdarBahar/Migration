@@ -300,16 +300,17 @@ class ElastiCacheProvisioner:
             print(f"❌ Failed to get VPC subnets: {e}")
             return []
 
-    def create_security_group(self, vpc_id, source_security_groups, engine='redis', port=6379):
+    def create_security_group(self, vpc_id, source_security_groups, engine='redis', port=6379, cache_type='cluster'):
         """Create a security group for ElastiCache that allows access from EC2."""
-        sg_name = f"elasticache-{engine}-{int(time.time())}"
+        type_suffix = "serverless" if cache_type == 'serverless' else "node"
+        sg_name = f"elasticache-{engine}-{type_suffix}-{int(time.time())}"
 
         # Update description to reflect both SG-based and optional VPC CIDR access
         allow_vpc_cidr = os.environ.get('ELASTICACHE_ALLOW_VPC_CIDR', 'false').lower() == 'true'
         if allow_vpc_cidr:
-            sg_description = f"Security group for ElastiCache {engine.title()} - allows access from EC2 security groups and VPC CIDR"
+            sg_description = f"Security group for ElastiCache {engine.title()} {type_suffix} - allows access from EC2 security groups and VPC CIDR"
         else:
-            sg_description = f"Security group for ElastiCache {engine.title()} - allows access from specific EC2 security groups only"
+            sg_description = f"Security group for ElastiCache {engine.title()} {type_suffix} - allows access from specific EC2 security groups only"
 
         try:
             # Create security group
@@ -428,9 +429,10 @@ class ElastiCacheProvisioner:
             print(f"❌ Failed to create security group: {e}")
             return None
 
-    def create_subnet_group(self, vpc_id, subnets):
+    def create_subnet_group(self, vpc_id, subnets, engine='redis', cache_type='cluster'):
         """Create ElastiCache subnet group."""
-        subnet_group_name = f"redis-subnet-group-{int(time.time())}"
+        type_suffix = "serverless" if cache_type == 'serverless' else "node"
+        subnet_group_name = f"{engine}-{type_suffix}-subnet-{int(time.time())}"
         
         try:
             # Use at least 2 subnets from different AZs for high availability
@@ -1430,20 +1432,22 @@ class ElastiCacheProvisioner:
         # Step 3: Create security group
         print(f"\n3️⃣  Creating security group with appropriate access rules...")
         port = config.get('port', 6379)
-        security_group_id = self.create_security_group(vpc_id, source_security_groups, engine_config['engine'], port)
+        security_group_id = self.create_security_group(vpc_id, source_security_groups, engine_config['engine'], port, engine_config['type'])
         if not security_group_id:
             return False
         print(f"   ✅ Security group created: {security_group_id}")
 
         # Step 4: Create subnet group
         print(f"\n4️⃣  Creating subnet group for multi-AZ deployment...")
-        subnet_group_name = self.create_subnet_group(vpc_id, subnets)
+        subnet_group_name = self.create_subnet_group(vpc_id, subnets, engine_config['engine'], engine_config['type'])
         if not subnet_group_name:
             return False
         print(f"   ✅ Subnet group created: {subnet_group_name}")
 
         # Step 5: Create ElastiCache based on engine selection
-        cache_name = f"{engine_config['engine']}-elasticache-{int(time.time())}"
+        # Include type in cache name for clarity
+        cache_type_suffix = "serverless" if engine_config['type'] == 'serverless' else "node"
+        cache_name = f"{engine_config['engine']}-{cache_type_suffix}-{int(time.time())}"
         print(f"\n5️⃣  Provisioning ElastiCache instance (this may take several minutes)...")
         print(f"   📍 Cache name: {cache_name}")
         print(f"   📍 Engine: {engine_config['engine'].title()}")
