@@ -520,6 +520,9 @@ class ElastiCacheProvisioner:
                     Port=port,
                     CacheSubnetGroupName=subnet_group_name,
                     SecurityGroupIds=[security_group_id],
+                    TransitEncryptionEnabled=False,  # Required parameter for CreateReplicationGroup
+                    AtRestEncryptionEnabled=False,   # Optional but recommended to specify
+                    AutomaticFailoverEnabled=False,  # Required when NumCacheClusters > 1
                     Tags=[
                         {'Key': 'Name', 'Value': f'{engine.title()}-ElastiCache'},
                         {'Key': 'Purpose', 'Value': 'Migration Testing'},
