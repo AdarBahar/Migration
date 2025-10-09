@@ -863,16 +863,28 @@ class ElastiCacheProvisioner:
 
         return None
 
-    def generate_env_config(self, cache_info, cache_name):
-        """Generate .env configuration for the ElastiCache cache."""
-        cache_type = "Serverless" if cache_info.get('type') == 'serverless' else "Cluster"
+    def generate_env_config(self, cache_info, cache_name, engine='redis', engine_version='7.1'):
+        """Generate .env configuration for the ElastiCache cache (legacy format for reference)."""
+        cache_type = cache_info.get('type', 'cluster')
+        if cache_type == 'serverless':
+            type_display = "Serverless"
+        elif cache_type == 'replication_group':
+            type_display = "Replication Group"
+        else:
+            type_display = "Cluster"
+
         config_lines = [
-            f"# ElastiCache Redis Configuration - Generated {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+            f"# ElastiCache {engine.title()} Configuration - Generated {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
             f"# Cache Name: {cache_name}",
-            f"# Type: Redis OSS {cache_type}",
+            f"# Engine: {engine.title()} {engine_version}",
+            f"# Type: {type_display}",
             f"# Description: Migration testing",
             f"",
-            f"# ElastiCache Redis (Source)",
+            f"# ⚠️  LEGACY FORMAT - For reference only",
+            f"# 💡 This database has been added to MIGRATION_SOURCES in your .env file",
+            f"# 💡 Use 'python3 manage_env.py' to manage databases",
+            f"",
+            f"# Legacy ElastiCache Configuration (Source)",
             f"REDIS_SOURCE_NAME={cache_name}",
             f"REDIS_SOURCE_HOST={cache_info['endpoint']}",
             f"REDIS_SOURCE_PORT={cache_info['port']}",
@@ -883,7 +895,8 @@ class ElastiCacheProvisioner:
             f"# Connection timeout",
             f"REDIS_TIMEOUT=5",
             f"",
-            f"# Note: Configure your destination Redis using manage_env.py",
+            f"# 📋 New Multi-Database Format (in .env file):",
+            f"# MIGRATION_SOURCES='[{{\"name\":\"{cache_name}\",\"engine\":\"{engine}\",\"engine_version\":\"{engine_version}\",\"host\":\"{cache_info['endpoint']}\",\"port\":\"{cache_info['port']}\",\"password\":\"\",\"tls\":false,\"db\":\"0\",\"source\":\"AWS ElastiCache {engine.title()}\"}}]'",
             f""
         ]
 
@@ -1051,69 +1064,76 @@ class ElastiCacheProvisioner:
         print(f"💾 Cache information saved to: {filename}")
         return filename
 
-    def update_env_file(self, cache_info, cache_name):
-        """Update the .env file with the new ElastiCache configuration."""
+    def update_env_file(self, cache_info, cache_name, engine='redis', engine_version='7.1'):
+        """Update the .env file with the new ElastiCache configuration using multi-database format."""
         env_file_path = '.env'
 
-        # Configuration to add/update
-        redis_config = {
-            'REDIS_SOURCE_NAME': cache_name,
-            'REDIS_SOURCE_HOST': cache_info['endpoint'],
-            'REDIS_SOURCE_PORT': str(cache_info['port']),
-            'REDIS_SOURCE_PASSWORD': '',
-            'REDIS_SOURCE_TLS': 'false',
-            'REDIS_SOURCE_DB': '0'
-        }
-
         try:
-            # Read existing .env file if it exists
-            existing_config = {}
-            if os.path.exists(env_file_path):
-                with open(env_file_path, 'r') as f:
-                    for line in f:
-                        line = line.strip()
-                        if line and not line.startswith('#') and '=' in line:
-                            key, value = line.split('=', 1)
-                            existing_config[key.strip()] = value.strip()
+            # Load existing environment
+            from dotenv import load_dotenv, set_key
+            load_dotenv(env_file_path)
 
-            # Update with new Redis source configuration
-            existing_config.update(redis_config)
+            # Load existing sources
+            import json
+            sources_json = os.getenv('MIGRATION_SOURCES', '[]')
+            try:
+                sources = json.loads(sources_json)
+            except json.JSONDecodeError:
+                sources = []
 
-            # Write updated configuration back to .env file
-            with open(env_file_path, 'w') as f:
-                f.write("# Redis Migration Configuration\n")
-                f.write(f"# Updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-                f.write(f"# ElastiCache instance: {cache_name}\n")
-                f.write("\n")
-                f.write("# Source Redis Configuration (ElastiCache)\n")
+            # Determine cache type
+            cache_type = cache_info.get('type', 'cluster')
+            if cache_type == 'serverless':
+                source_type = f"AWS ElastiCache {engine.title()} Serverless"
+            elif cache_type == 'replication_group':
+                source_type = f"AWS ElastiCache {engine.title()}"
+            else:
+                source_type = f"AWS ElastiCache {engine.title()}"
 
-                # Write Redis source configuration first
-                for key in ['REDIS_SOURCE_NAME', 'REDIS_SOURCE_HOST', 'REDIS_SOURCE_PORT',
-                           'REDIS_SOURCE_PASSWORD', 'REDIS_SOURCE_TLS', 'REDIS_SOURCE_DB']:
-                    if key in existing_config:
-                        f.write(f"{key}={existing_config[key]}\n")
+            # Create new database configuration
+            new_db = {
+                'name': cache_name,
+                'engine': engine,
+                'engine_version': engine_version,
+                'host': cache_info['endpoint'],
+                'port': str(cache_info['port']),
+                'password': '',
+                'tls': False,  # ElastiCache typically uses TLS, but we default to False for testing
+                'db': '0',
+                'source': source_type
+            }
 
-                f.write("\n")
-                f.write("# Other Configuration\n")
+            # Check if this database already exists (by host and port)
+            db_exists = False
+            for i, db in enumerate(sources):
+                if db.get('host') == new_db['host'] and db.get('port') == new_db['port']:
+                    # Update existing entry
+                    sources[i] = new_db
+                    db_exists = True
+                    print(f"   📝 Updated existing database entry in MIGRATION_SOURCES")
+                    break
 
-                # Write remaining configuration
-                for key, value in existing_config.items():
-                    if not key.startswith('REDIS_SOURCE_'):
-                        f.write(f"{key}={value}\n")
+            if not db_exists:
+                # Add new database to sources
+                sources.append(new_db)
+                print(f"   ➕ Added new database to MIGRATION_SOURCES")
+
+            # Save updated sources back to .env
+            sources_json = json.dumps(sources)
+            set_key(env_file_path, 'MIGRATION_SOURCES', sources_json)
 
             print(f"✅ Updated .env file with ElastiCache configuration")
-            print(f"📍 Source Redis configured:")
-            for key, value in redis_config.items():
-                display_value = value if value else "(empty)"
-                print(f"   {key}={display_value}")
+            print(f"   📍 Database: {cache_name}")
+            print(f"   📍 Engine: {engine.title()} {engine_version}")
+            print(f"   📍 Endpoint: {cache_info['endpoint']}:{cache_info['port']}")
+            print(f"   💡 Use 'python3 manage_env.py' to view, test, or manage databases")
 
             return True
 
         except Exception as e:
             print(f"❌ Failed to update .env file: {e}")
-            print(f"💡 You can manually add these settings to your .env file:")
-            for key, value in redis_config.items():
-                print(f"   {key}={value}")
+            print(f"💡 You can manually add the database using:")
+            print(f"   python3 manage_env.py")
             return False
 
     def display_security_configuration(self):
@@ -1394,7 +1414,12 @@ class ElastiCacheProvisioner:
 
         # Step 8: Generate configuration
         print(f"\n8️⃣  Generating configuration files...")
-        env_config = self.generate_env_config(cache_info, created_cache_name)
+        env_config = self.generate_env_config(
+            cache_info,
+            created_cache_name,
+            engine_config['engine'],
+            config['engine_version']
+        )
 
         # Save to file
         env_filename = f"elasticache_{created_cache_name.replace('-', '_')}.env"
@@ -1415,12 +1440,17 @@ class ElastiCacheProvisioner:
 
         if interactive:
             print(f"🤔 Would you like to add this ElastiCache instance to your .env file")
-            print(f"   as the Source Redis configuration? (Y/n): ", end="")
+            print(f"   as a Source database? (Y/n): ", end="")
             update_env = input().strip().lower()
 
             if update_env in ['', 'y', 'yes']:
                 print(f"📝 Updating .env file with ElastiCache configuration...")
-                env_updated = self.update_env_file(cache_info, created_cache_name)
+                env_updated = self.update_env_file(
+                    cache_info,
+                    created_cache_name,
+                    engine_config['engine'],
+                    config['engine_version']
+                )
                 if env_updated:
                     print(f"   ✅ .env file updated successfully")
                 else:
