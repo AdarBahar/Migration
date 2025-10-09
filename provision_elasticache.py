@@ -507,23 +507,47 @@ class ElastiCacheProvisioner:
             # Determine port based on engine
             port = 6379 if engine == 'redis' else 6379  # Both use same port
 
-            response = self.elasticache_client.create_cache_cluster(
-                CacheClusterId=cluster_id,
-                Engine=engine,
-                EngineVersion=engine_version,
-                CacheNodeType=node_type,
-                NumCacheNodes=1,
-                Port=port,
-                CacheSubnetGroupName=subnet_group_name,
-                SecurityGroupIds=[security_group_id],
-                Tags=[
-                    {'Key': 'Name', 'Value': f'{engine.title()}-ElastiCache'},
-                    {'Key': 'Purpose', 'Value': 'Migration Testing'},
-                    {'Key': 'CreatedBy', 'Value': 'Migration-Tool'},
-                    {'Key': 'Environment', 'Value': 'Development'},
-                    {'Key': 'Engine', 'Value': engine}
-                ]
-            )
+            if engine == 'valkey':
+                # Valkey requires CreateReplicationGroup API
+                print(f"📋 Using CreateReplicationGroup API for Valkey")
+                response = self.elasticache_client.create_replication_group(
+                    ReplicationGroupId=cluster_id,
+                    Description=f'Valkey cluster for migration testing',
+                    Engine=engine,
+                    EngineVersion=engine_version,
+                    CacheNodeType=node_type,
+                    NumCacheClusters=1,
+                    Port=port,
+                    CacheSubnetGroupName=subnet_group_name,
+                    SecurityGroupIds=[security_group_id],
+                    Tags=[
+                        {'Key': 'Name', 'Value': f'{engine.title()}-ElastiCache'},
+                        {'Key': 'Purpose', 'Value': 'Migration Testing'},
+                        {'Key': 'CreatedBy', 'Value': 'Migration-Tool'},
+                        {'Key': 'Environment', 'Value': 'Development'},
+                        {'Key': 'Engine', 'Value': engine}
+                    ]
+                )
+            else:
+                # Redis uses CreateCacheCluster API
+                print(f"📋 Using CreateCacheCluster API for Redis")
+                response = self.elasticache_client.create_cache_cluster(
+                    CacheClusterId=cluster_id,
+                    Engine=engine,
+                    EngineVersion=engine_version,
+                    CacheNodeType=node_type,
+                    NumCacheNodes=1,
+                    Port=port,
+                    CacheSubnetGroupName=subnet_group_name,
+                    SecurityGroupIds=[security_group_id],
+                    Tags=[
+                        {'Key': 'Name', 'Value': f'{engine.title()}-ElastiCache'},
+                        {'Key': 'Purpose', 'Value': 'Migration Testing'},
+                        {'Key': 'CreatedBy', 'Value': 'Migration-Tool'},
+                        {'Key': 'Environment', 'Value': 'Development'},
+                        {'Key': 'Engine', 'Value': engine}
+                    ]
+                )
 
             print(f"✅ ElastiCache {engine.title()} cluster creation initiated: {cluster_id}")
             return {'name': cluster_id, 'type': 'cluster', 'engine': engine}
@@ -608,13 +632,23 @@ class ElastiCacheProvisioner:
                     progress_info['estimated_remaining'] = "3-5 minutes"
 
             else:
-                response = self.elasticache_client.describe_cache_clusters(
-                    CacheClusterId=cache_name,
-                    ShowCacheNodeInfo=True
-                )
-                cluster = response['CacheClusters'][0]
-                status = cluster['CacheClusterStatus']
-                progress_info['status'] = status
+                if engine == 'valkey':
+                    # For Valkey replication groups
+                    response = self.elasticache_client.describe_replication_groups(
+                        ReplicationGroupId=cache_name
+                    )
+                    replication_group = response['ReplicationGroups'][0]
+                    status = replication_group['Status']
+                    progress_info['status'] = status
+                else:
+                    # For Redis cache clusters
+                    response = self.elasticache_client.describe_cache_clusters(
+                        CacheClusterId=cache_name,
+                        ShowCacheNodeInfo=True
+                    )
+                    cluster = response['CacheClusters'][0]
+                    status = cluster['CacheClusterStatus']
+                    progress_info['status'] = status
 
                 # Traditional cluster provisioning steps
                 if status == 'creating':
@@ -646,9 +680,14 @@ class ElastiCacheProvisioner:
 
         return progress_info
 
-    def wait_for_cache_available(self, cache_name, is_serverless=True, timeout_minutes=15):
-        """Wait for ElastiCache (serverless or cluster) to become available with detailed progress."""
-        cache_type = "serverless cache" if is_serverless else "cluster"
+    def wait_for_cache_available(self, cache_name, is_serverless=True, timeout_minutes=15, engine='redis'):
+        """Wait for ElastiCache (serverless, cluster, or replication group) to become available with detailed progress."""
+        if is_serverless:
+            cache_type = "serverless cache"
+        elif engine == 'valkey':
+            cache_type = "replication group"
+        else:
+            cache_type = "cluster"
         print(f"⏳ Waiting for {cache_type} {cache_name} to become available...")
         print(f"⏱️  Timeout: {timeout_minutes} minutes")
         print(f"")
@@ -732,23 +771,42 @@ class ElastiCacheProvisioner:
                         return None
                 else:
                     if status == 'available':
-                        response = self.elasticache_client.describe_cache_clusters(
-                            CacheClusterId=cache_name,
-                            ShowCacheNodeInfo=True
-                        )
-                        cluster = response['CacheClusters'][0]
-                        endpoint = cluster['CacheNodes'][0]['Endpoint']
-                        print(f"✅ Cluster is available!")
-                        print(f"📍 Endpoint: {endpoint['Address']}:{endpoint['Port']}")
-                        print(f"⏱️  Total provisioning time: {elapsed_minutes:.1f} minutes")
-                        return {
-                            'endpoint': endpoint['Address'],
-                            'port': endpoint['Port'],
-                            'status': status,
-                            'type': 'cluster'
-                        }
+                        if engine == 'valkey':
+                            # For Valkey replication groups
+                            response = self.elasticache_client.describe_replication_groups(
+                                ReplicationGroupId=cache_name
+                            )
+                            replication_group = response['ReplicationGroups'][0]
+                            endpoint = replication_group['NodeGroups'][0]['PrimaryEndpoint']
+                            print(f"✅ Replication group is available!")
+                            print(f"📍 Endpoint: {endpoint['Address']}:{endpoint['Port']}")
+                            print(f"⏱️  Total provisioning time: {elapsed_minutes:.1f} minutes")
+                            return {
+                                'endpoint': endpoint['Address'],
+                                'port': endpoint['Port'],
+                                'status': status,
+                                'type': 'replication_group'
+                            }
+                        else:
+                            # For Redis cache clusters
+                            response = self.elasticache_client.describe_cache_clusters(
+                                CacheClusterId=cache_name,
+                                ShowCacheNodeInfo=True
+                            )
+                            cluster = response['CacheClusters'][0]
+                            endpoint = cluster['CacheNodes'][0]['Endpoint']
+                            print(f"✅ Cluster is available!")
+                            print(f"📍 Endpoint: {endpoint['Address']}:{endpoint['Port']}")
+                            print(f"⏱️  Total provisioning time: {elapsed_minutes:.1f} minutes")
+                            return {
+                                'endpoint': endpoint['Address'],
+                                'port': endpoint['Port'],
+                                'status': status,
+                                'type': 'cluster'
+                            }
                     elif status in ['failed', 'incompatible-parameters', 'incompatible-network']:
-                        print(f"❌ Cluster creation failed with status: {status}")
+                        cache_type_name = "replication group" if engine == 'valkey' else "cluster"
+                        print(f"❌ {cache_type_name.title()} creation failed with status: {status}")
                         return None
 
                 time.sleep(30)  # Wait 30 seconds before checking again
@@ -1257,7 +1315,7 @@ class ElastiCacheProvisioner:
         print(f"\n6️⃣  Waiting for ElastiCache to become available...")
         print(f"   📍 This is typically the longest step (5-15 minutes)")
         print(f"   📍 You'll see detailed progress updates below")
-        cache_info = self.wait_for_cache_available(created_cache_name, is_serverless)
+        cache_info = self.wait_for_cache_available(created_cache_name, is_serverless, 15, engine_config['engine'])
         if not cache_info:
             print("❌ Cache did not become available within timeout period")
             return False
