@@ -10,58 +10,126 @@ from getpass import getpass
 ENV_PATH = ".env"
 load_dotenv(ENV_PATH)
 
+# Database configuration storage
+SOURCES_KEY = "MIGRATION_SOURCES"
+TARGETS_KEY = "MIGRATION_TARGETS"
+TEST_RESULTS_KEY = "MIGRATION_TEST_RESULTS"
+
 def reload_env():
     """Reload updated .env values into the environment."""
     load_dotenv(ENV_PATH, override=True)
 
-def prompt_env(key, label, secret=False, default=None, max_length=None, allow_empty=False):
-    """Prompt user for a value and set it in the .env file."""
-    current = os.getenv(key, default or "")
+def load_databases(db_type):
+    """Load source or target databases from .env file.
 
-    # For passwords, show a more helpful prompt
-    if secret and current and current not in ["", "your-source-password", "your-destination-password"]:
-        prompt = f"{label} [***hidden***] (press Enter to keep current, or type new): "
-    elif secret:
-        prompt = f"{label} (press Enter for no password): "
-    else:
-        prompt = f"{label} [{current}]: "
+    Args:
+        db_type: 'sources' or 'targets'
 
-    while True:
-        new_value = getpass(prompt) if secret else input(prompt).strip()
+    Returns:
+        List of database configurations
+    """
+    key = SOURCES_KEY if db_type == 'sources' else TARGETS_KEY
+    data = os.getenv(key, '[]')
+    try:
+        return json.loads(data)
+    except json.JSONDecodeError:
+        return []
 
-        # Handle empty input
-        if not new_value:
-            if secret and allow_empty:
-                # For passwords, empty input means no password
-                new_value = ""
-            elif secret and current not in ["", "your-source-password", "your-destination-password"]:
-                # Keep existing password if it's not a placeholder
-                new_value = current
-            elif not secret:
-                # For non-secrets, keep current value if not empty
-                new_value = current if current else ""
-            else:
-                # For passwords with placeholder values, set to empty
-                new_value = ""
+def save_databases(db_type, databases):
+    """Save source or target databases to .env file.
 
-        if max_length and len(new_value) > max_length:
-            print(f"⚠️ Value too long. Max {max_length} characters allowed.")
-            continue
-        break
-
-    set_key(ENV_PATH, key, new_value)
+    Args:
+        db_type: 'sources' or 'targets'
+        databases: List of database configurations
+    """
+    key = SOURCES_KEY if db_type == 'sources' else TARGETS_KEY
+    set_key(ENV_PATH, key, json.dumps(databases))
     reload_env()
 
-def setup_source_connection():
-    """Setup source Redis connection using AWS ElastiCache CLI command."""
-    print(f"\n🔧 Configuring Source Redis (AWS ElastiCache)")
+def load_test_results():
+    """Load test results from .env file."""
+    data = os.getenv(TEST_RESULTS_KEY, '{}')
+    try:
+        return json.loads(data)
+    except json.JSONDecodeError:
+        return {}
+
+def save_test_results(results):
+    """Save test results to .env file."""
+    set_key(ENV_PATH, TEST_RESULTS_KEY, json.dumps(results))
+    reload_env()
+
+def get_db_id(db_config):
+    """Generate unique ID for database configuration."""
+    return f"{db_config['engine']}_{db_config['host']}_{db_config['port']}"
+
+# Legacy functions removed - now using new database management system
+
+def add_database(db_type):
+    """Add a new source or target database with engine selection.
+
+    Args:
+        db_type: 'sources' or 'targets'
+    """
+    label = "Source" if db_type == 'sources' else "Target"
+    print(f"\n🔧 Add New {label} Database")
+    print("=" * 60)
+
+    # Select engine type
+    print("\n📦 Select Database Engine:")
+    print("1. Redis (AWS ElastiCache Redis)")
+    print("2. Valkey (AWS ElastiCache Valkey)")
+    print("3. Redis Cloud")
+    print("4. Manual Redis/Valkey Configuration")
+    print("5. Cancel")
+
+    engine_choice = input(f"\nSelect engine type [1-5]: ").strip()
+
+    if engine_choice == '1':
+        db_config = setup_elasticache_redis()
+    elif engine_choice == '2':
+        db_config = setup_elasticache_valkey()
+    elif engine_choice == '3':
+        db_config = setup_redis_cloud()
+    elif engine_choice == '4':
+        db_config = setup_manual_database()
+    elif engine_choice == '5':
+        print("❌ Cancelled.")
+        return
+    else:
+        print("❌ Invalid choice.")
+        return
+
+    if not db_config:
+        print("❌ Database configuration failed.")
+        return
+
+    # Add to database list
+    databases = load_databases(db_type)
+    databases.append(db_config)
+    save_databases(db_type, databases)
+
+    print(f"\n✅ {label} database added successfully!")
+
+    # Auto-test connection
+    print(f"\n🔌 Testing connection to {db_config['name']}...")
+    test_single_database(db_config, db_type)
+
+    input("\nPress Enter to continue...")
+
+def setup_elasticache_redis():
+    """Setup AWS ElastiCache Redis connection."""
+    print(f"\n🔧 Configuring AWS ElastiCache Redis")
     print("=" * 50)
 
     # Get friendly name
-    prompt_env("REDIS_SOURCE_NAME", "Name (friendly label)", max_length=50)
+    name = input("Database name (friendly label): ").strip()
+    if not name:
+        print("❌ Name cannot be empty.")
+        return None
 
     # Instructions for getting AWS CLI command
-    print("\n📋 AWS ElastiCache Connection Instructions:")
+    print("\n📋 AWS ElastiCache Redis Connection Instructions:")
     print("1. Go to AWS Console > ElastiCache > Redis OSS caches")
     print("2. Click on your cache cluster")
     print("3. Go to 'Connecting to your cache' tab")
@@ -102,37 +170,100 @@ def setup_source_connection():
         else:
             print("Please enter the command again.")
 
-    # Set the parsed values in environment
-    set_key(ENV_PATH, "REDIS_SOURCE_HOST", parsed['host'])
-    set_key(ENV_PATH, "REDIS_SOURCE_PORT", parsed['port'])
-    set_key(ENV_PATH, "REDIS_SOURCE_TLS", "true" if parsed['tls'] else "false")
-
-    # Set default database if not already set
-    if not os.getenv("REDIS_SOURCE_DB"):
-        set_key(ENV_PATH, "REDIS_SOURCE_DB", "0")
-
     # Ask for password (ElastiCache might not need one, but allow setting)
     print("\n🔒 Password Configuration:")
     print("💡 Many AWS ElastiCache instances don't require a password")
     print("💡 Press Enter to skip password, or enter one if your instance requires it")
-    prompt_env("REDIS_SOURCE_PASSWORD", "Password (optional)", secret=True, allow_empty=True)
+    password = getpass("Password (optional, press Enter to skip): ").strip()
 
-    reload_env()
+    return {
+        'name': name,
+        'engine': 'redis',
+        'engine_version': 'Unknown',
+        'host': parsed['host'],
+        'port': parsed['port'],
+        'password': password,
+        'tls': parsed['tls'],
+        'db': '0',
+        'source': 'AWS ElastiCache'
+    }
 
-    print("✅ Source Redis configuration updated successfully!")
-    print("💡 You can test the connection using option 3 from the main menu.")
+def setup_elasticache_valkey():
+    """Setup AWS ElastiCache Valkey connection."""
+    print(f"\n🔧 Configuring AWS ElastiCache Valkey")
+    print("=" * 50)
 
-def setup_connection(label_prefix):
-    """Legacy function - prompt user for Redis connection config manually."""
-    print(f"\n🔧 Configuring {label_prefix.capitalize()} Redis (Manual)")
-    prompt_env(f"{label_prefix.upper()}_NAME", "Name (friendly label)", max_length=50)
-    prompt_env(f"{label_prefix.upper()}_HOST", "Host")
-    prompt_env(f"{label_prefix.upper()}_PORT", "Port")
-    prompt_env(f"{label_prefix.upper()}_PASSWORD", "Password (hidden)", secret=True, allow_empty=True)
-    tls = input("Use TLS/SSL? (y/n): ").strip().lower()
-    tls_value = "true" if tls == "y" else "false"
-    set_key(ENV_PATH, f"{label_prefix.upper()}_TLS", tls_value)
-    reload_env()
+    # Get friendly name
+    name = input("Database name (friendly label): ").strip()
+    if not name:
+        print("❌ Name cannot be empty.")
+        return None
+
+    # Instructions for getting Valkey CLI command
+    print("\n📋 AWS ElastiCache Valkey Connection Instructions:")
+    print("1. Go to AWS Console > ElastiCache > Valkey caches")
+    print("2. Click on your cache cluster or replication group")
+    print("3. Go to 'Connecting to your cache' tab")
+    print("4. Copy the primary endpoint or CLI command")
+    print()
+    print("💡 Expected formats:")
+    print("   valkey-cli --tls -h your-valkey.amazonaws.com -p 6379")
+    print("   valkey-cli -h your-valkey.amazonaws.com -p 6379")
+    print("   Or just the endpoint: your-valkey.amazonaws.com:6379")
+    print()
+
+    while True:
+        cli_input = input("🔗 Valkey endpoint or CLI command: ").strip()
+
+        if not cli_input:
+            print("❌ Input cannot be empty.")
+            continue
+
+        # Try parsing as CLI command first
+        parsed = parse_valkey_cli(cli_input)
+
+        # If not a CLI command, try parsing as endpoint
+        if not parsed:
+            parsed = parse_endpoint(cli_input)
+
+        if not parsed:
+            print("❌ Invalid format.")
+            print("💡 Expected: valkey-cli --tls -h host.amazonaws.com -p 6379")
+            print("💡 Or: host.amazonaws.com:6379")
+            continue
+
+        # Show parsed information for confirmation
+        print(f"\n✅ Successfully parsed Valkey connection:")
+        print(f"   🏠 Host: {parsed['host']}")
+        print(f"   🔌 Port: {parsed['port']}")
+        print(f"   🔐 TLS: {'Enabled' if parsed['tls'] else 'Disabled'}")
+        print()
+
+        confirm = input("Is this information correct? (y/n): ").strip().lower()
+        if confirm == 'y':
+            break
+        else:
+            print("Please enter the information again.")
+
+    # Ask for password
+    print("\n🔒 Password Configuration:")
+    print("💡 Many AWS ElastiCache Valkey instances don't require a password")
+    print("💡 Press Enter to skip password, or enter one if your instance requires it")
+    password = getpass("Password (optional, press Enter to skip): ").strip()
+
+    return {
+        'name': name,
+        'engine': 'valkey',
+        'engine_version': 'Unknown',
+        'host': parsed['host'],
+        'port': parsed['port'],
+        'password': password,
+        'tls': parsed['tls'],
+        'db': '0',
+        'source': 'AWS ElastiCache Valkey'
+    }
+
+# Legacy setup_connection function removed
 
 def parse_redis_url(redis_url):
     """Parse Redis URL and extract connection parameters.
@@ -223,13 +354,104 @@ def parse_aws_redis_cli(cli_command):
         "password": ""
     }
 
-def setup_destination_connection():
-    """Simplified destination Redis setup using Redis Cloud URL."""
-    print(f"\n🔧 Configuring Destination Redis (Redis Cloud)")
+def parse_valkey_cli(cli_command):
+    """Parse Valkey CLI command and extract connection parameters.
+
+    Supports formats:
+    - valkey-cli --tls -h host.amazonaws.com -p 6379
+    - valkey-cli -h host.amazonaws.com -p 6379
+    - valkey-cli -h host.amazonaws.com -p 6379 --tls
+
+    Returns dict with parsed parameters or None if invalid.
+    """
+    if not cli_command or not cli_command.strip():
+        return None
+
+    command = cli_command.strip()
+
+    # Check if it's a valkey-cli command
+    if not command.startswith('valkey-cli'):
+        return None
+
+    # Initialize defaults
+    host = None
+    port = "6379"
+    tls = False
+
+    # Split command into parts
+    parts = command.split()
+
+    # Parse arguments
+    i = 1  # Skip the valkey-cli part
+    while i < len(parts):
+        arg = parts[i]
+
+        if arg == '--tls':
+            tls = True
+            i += 1
+        elif arg == '-h' and i + 1 < len(parts):
+            host = parts[i + 1]
+            i += 2
+        elif arg == '-p' and i + 1 < len(parts):
+            port = parts[i + 1]
+            i += 2
+        else:
+            i += 1
+
+    # Validate that we got a host
+    if not host:
+        return None
+
+    return {
+        "host": host,
+        "port": port,
+        "tls": tls
+    }
+
+def parse_endpoint(endpoint):
+    """Parse endpoint in format host:port or just host.
+
+    Returns dict with parsed parameters or None if invalid.
+    """
+    if not endpoint or not endpoint.strip():
+        return None
+
+    endpoint = endpoint.strip()
+
+    # Check for host:port format
+    if ':' in endpoint:
+        parts = endpoint.split(':')
+        if len(parts) == 2:
+            host = parts[0]
+            try:
+                port = str(int(parts[1]))  # Validate port is numeric
+                return {
+                    "host": host,
+                    "port": port,
+                    "tls": False  # Default to no TLS for plain endpoint
+                }
+            except ValueError:
+                return None
+    else:
+        # Just host, use default port
+        return {
+            "host": endpoint,
+            "port": "6379",
+            "tls": False
+        }
+
+    return None
+
+def setup_redis_cloud():
+    """Setup Redis Cloud connection."""
+    print(f"\n🔧 Configuring Redis Cloud")
     print("=" * 50)
 
     # Get friendly name
-    prompt_env("REDIS_DEST_NAME", "Name (friendly label)", max_length=50)
+    name = input("Database name (friendly label): ").strip()
+    if not name:
+        print("❌ Name cannot be empty.")
+        return None
 
     # Instructions for getting Redis Cloud URL
     print("\n📋 Redis Cloud Connection Instructions:")
@@ -288,48 +510,330 @@ def setup_destination_connection():
         else:
             print("Please enter the URL again.")
 
-    # Set the parsed values in environment
-    set_key(ENV_PATH, "REDIS_DEST_HOST", parsed['host'])
-    set_key(ENV_PATH, "REDIS_DEST_PORT", parsed['port'])
-    set_key(ENV_PATH, "REDIS_DEST_PASSWORD", parsed['password'])
-    set_key(ENV_PATH, "REDIS_DEST_TLS", "true" if parsed['tls'] else "false")
+    return {
+        'name': name,
+        'engine': 'redis',
+        'engine_version': 'Unknown',
+        'host': parsed['host'],
+        'port': parsed['port'],
+        'password': parsed['password'],
+        'tls': parsed['tls'],
+        'db': '0',
+        'source': 'Redis Cloud'
+    }
 
-    # Set default database if not already set
-    if not os.getenv("REDIS_DEST_DB"):
-        set_key(ENV_PATH, "REDIS_DEST_DB", "0")
+def setup_manual_database():
+    """Setup database connection manually."""
+    print(f"\n🔧 Manual Database Configuration")
+    print("=" * 50)
 
-    reload_env()
+    # Get friendly name
+    name = input("Database name (friendly label): ").strip()
+    if not name:
+        print("❌ Name cannot be empty.")
+        return None
 
-    print("✅ Destination Redis configuration updated successfully!")
-    print("💡 You can test the connection using option 4 from the main menu.")
+    # Select engine
+    print("\n📦 Select Engine:")
+    print("1. Redis")
+    print("2. Valkey")
+    engine_choice = input("Select engine [1-2]: ").strip()
 
-def show_current_config():
-    print("\n📄 Current Redis Configuration:")
-    keys_to_show = [
-        ("REDIS_SOURCE_NAME", "Source Name"),
-        ("REDIS_SOURCE_HOST", "Source Host"),
-        ("REDIS_SOURCE_PORT", "Source Port"),
-        ("REDIS_SOURCE_TLS",  "Source TLS"),
+    if engine_choice == '1':
+        engine = 'redis'
+    elif engine_choice == '2':
+        engine = 'valkey'
+    else:
+        print("❌ Invalid choice.")
+        return None
 
-        ("REDIS_DEST_NAME",   "Destination Name"),
-        ("REDIS_DEST_HOST",   "Destination Host"),
-        ("REDIS_DEST_PORT",   "Destination Port"),
-        ("REDIS_DEST_TLS",    "Destination TLS"),
-    ]
-    for key, label in keys_to_show:
-        value = os.getenv(key, "(not set)")
-        print(f"{label}: {value}")
-    print("Passwords are hidden for security.\n")
+    # Get connection details
+    host = input("Host: ").strip()
+    if not host:
+        print("❌ Host cannot be empty.")
+        return None
 
-def test_redis_connection(prefix):
-    """Test Redis connectivity using .env settings."""
-    name = os.getenv(f"{prefix}_NAME", prefix)
-    host = os.getenv(f"{prefix}_HOST")
-    port = int(os.getenv(f"{prefix}_PORT", 6379))
-    password = os.getenv(f"{prefix}_PASSWORD")
-    use_tls = os.getenv(f"{prefix}_TLS", "false").lower() == "true"
+    port = input("Port [6379]: ").strip() or "6379"
 
-    print(f"\n🔌 Testing connection to {name} ({host}:{port})...")
+    password = getpass("Password (press Enter for no password): ").strip()
+
+    tls_input = input("Use TLS/SSL? (y/n) [n]: ").strip().lower()
+    tls = tls_input == 'y'
+
+    db = input("Database number [0]: ").strip() or "0"
+
+    return {
+        'name': name,
+        'engine': engine,
+        'engine_version': 'Unknown',
+        'host': host,
+        'port': port,
+        'password': password,
+        'tls': tls,
+        'db': db,
+        'source': 'Manual Configuration'
+    }
+
+def manage_databases_menu(db_type):
+    """Show menu to manage source or target databases.
+
+    Args:
+        db_type: 'sources' or 'targets'
+    """
+    label = "Source" if db_type == 'sources' else "Target"
+
+    while True:
+        databases = load_databases(db_type)
+        test_results = load_test_results()
+
+        print(f"\n📦 {label} Databases Management")
+        print("=" * 60)
+
+        if databases:
+            print(f"\n📍 Configured {label} Databases:")
+            for i, db in enumerate(databases, 1):
+                db_id = get_db_id(db)
+                test_result = test_results.get(db_id, {})
+
+                status_icon = "⏳"
+                status_text = "Never tested"
+                if test_result.get('status') == 'success':
+                    status_icon = "✅"
+                    timestamp = test_result.get('timestamp', '')
+                    if timestamp:
+                        try:
+                            dt = datetime.fromisoformat(timestamp)
+                            status_text = f"Tested: {dt.strftime('%Y-%m-%d %H:%M')}"
+                        except:
+                            status_text = "Tested: Recently"
+                elif test_result.get('status') == 'failed':
+                    status_icon = "❌"
+                    status_text = "Test failed"
+
+                engine_display = db['engine'].title()
+                if db.get('engine_version') and db['engine_version'] != 'Unknown':
+                    engine_display += f" {db['engine_version']}"
+
+                print(f"   {i}. {db['name']} ({engine_display}) - {status_icon} {status_text}")
+                print(f"      {db['host']}:{db['port']} | TLS: {'Yes' if db.get('tls') else 'No'}")
+        else:
+            print(f"\n⚠️  No {label.lower()} databases configured yet.")
+
+        print(f"\nOptions:")
+        print(f"1. Add New {label} Database")
+        print(f"2. Edit Existing {label} Database")
+        print(f"3. Test {label} Database Connection")
+        print(f"4. Delete {label} Database")
+        print(f"5. Back to Main Menu")
+
+        choice = input(f"\nSelect option [1-5]: ").strip()
+
+        if choice == '1':
+            add_database(db_type)
+        elif choice == '2':
+            edit_database(db_type)
+        elif choice == '3':
+            test_databases_menu(db_type)
+        elif choice == '4':
+            delete_database(db_type)
+        elif choice == '5':
+            break
+        else:
+            print("❌ Invalid choice.")
+
+def edit_database(db_type):
+    """Edit an existing database configuration.
+
+    Args:
+        db_type: 'sources' or 'targets'
+    """
+    label = "Source" if db_type == 'sources' else "Target"
+    databases = load_databases(db_type)
+
+    if not databases:
+        print(f"\n⚠️  No {label.lower()} databases configured.")
+        input("Press Enter to continue...")
+        return
+
+    print(f"\n✏️  Edit {label} Database")
+    print("=" * 60)
+    print(f"\n📍 Select database to edit:")
+
+    for i, db in enumerate(databases, 1):
+        print(f"{i}. {db['name']} ({db['engine'].title()}) - {db['host']}:{db['port']}")
+    print(f"{len(databases) + 1}. Cancel")
+
+    choice = input(f"\nSelect database [1-{len(databases) + 1}]: ").strip()
+
+    if not choice.isdigit() or not (1 <= int(choice) <= len(databases) + 1):
+        print("❌ Invalid choice.")
+        return
+
+    if int(choice) == len(databases) + 1:
+        return
+
+    db_index = int(choice) - 1
+    db = databases[db_index]
+
+    print(f"\n✏️  Editing: {db['name']}")
+    print("=" * 60)
+    print("Press Enter to keep current value")
+    print()
+
+    # Edit fields
+    new_name = input(f"Name [{db['name']}]: ").strip()
+    if new_name:
+        db['name'] = new_name
+
+    new_host = input(f"Host [{db['host']}]: ").strip()
+    if new_host:
+        db['host'] = new_host
+
+    new_port = input(f"Port [{db['port']}]: ").strip()
+    if new_port:
+        db['port'] = new_port
+
+    print(f"Password: {'***set***' if db.get('password') else '(not set)'}")
+    change_password = input("Change password? (y/n) [n]: ").strip().lower()
+    if change_password == 'y':
+        new_password = getpass("New password (press Enter for no password): ").strip()
+        db['password'] = new_password
+
+    new_tls = input(f"Use TLS? (y/n) [{'y' if db.get('tls') else 'n'}]: ").strip().lower()
+    if new_tls:
+        db['tls'] = new_tls == 'y'
+
+    # Save changes
+    databases[db_index] = db
+    save_databases(db_type, databases)
+
+    print(f"\n✅ {label} database updated successfully!")
+
+    # Ask to test
+    test_now = input("\nTest connection now? (y/n) [y]: ").strip().lower()
+    if test_now != 'n':
+        print()
+        test_single_database(db, db_type)
+
+    input("\nPress Enter to continue...")
+
+def delete_database(db_type):
+    """Delete a database configuration.
+
+    Args:
+        db_type: 'sources' or 'targets'
+    """
+    label = "Source" if db_type == 'sources' else "Target"
+    databases = load_databases(db_type)
+
+    if not databases:
+        print(f"\n⚠️  No {label.lower()} databases configured.")
+        input("Press Enter to continue...")
+        return
+
+    print(f"\n🗑️  Delete {label} Database")
+    print("=" * 60)
+    print(f"\n📍 Select database to delete:")
+
+    for i, db in enumerate(databases, 1):
+        print(f"{i}. {db['name']} ({db['engine'].title()}) - {db['host']}:{db['port']}")
+    print(f"{len(databases) + 1}. Cancel")
+
+    choice = input(f"\nSelect database [1-{len(databases) + 1}]: ").strip()
+
+    if not choice.isdigit() or not (1 <= int(choice) <= len(databases) + 1):
+        print("❌ Invalid choice.")
+        return
+
+    if int(choice) == len(databases) + 1:
+        return
+
+    db_index = int(choice) - 1
+    db = databases[db_index]
+
+    # Confirm deletion
+    print(f"\n⚠️  Are you sure you want to delete:")
+    print(f"   Name: {db['name']}")
+    print(f"   Engine: {db['engine'].title()}")
+    print(f"   Host: {db['host']}:{db['port']}")
+
+    confirm = input("\nType 'DELETE' to confirm: ").strip()
+
+    if confirm == 'DELETE':
+        databases.pop(db_index)
+        save_databases(db_type, databases)
+        print(f"\n✅ {label} database deleted successfully!")
+    else:
+        print("\n❌ Deletion cancelled.")
+
+    input("\nPress Enter to continue...")
+
+def view_all_configurations():
+    """Display all configured databases."""
+    sources = load_databases('sources')
+    targets = load_databases('targets')
+    test_results = load_test_results()
+
+    print("\n📊 All Configured Databases")
+    print("=" * 60)
+
+    if sources:
+        print("\n🔹 Source Databases:")
+        for i, db in enumerate(sources, 1):
+            db_id = get_db_id(db)
+            test_result = test_results.get(db_id, {})
+            status_icon = "⏳" if not test_result else ("✅" if test_result.get('status') == 'success' else "❌")
+
+            engine_display = db['engine'].title()
+            if db.get('engine_version') and db['engine_version'] != 'Unknown':
+                engine_display += f" {db['engine_version']}"
+
+            print(f"   {i}. {db['name']} ({engine_display}) - {status_icon}")
+            print(f"      Host: {db['host']}:{db['port']}")
+            print(f"      TLS: {'Enabled' if db.get('tls') else 'Disabled'}")
+            print(f"      Source: {db.get('source', 'Unknown')}")
+            print()
+    else:
+        print("\n🔹 Source Databases: None configured")
+
+    if targets:
+        print("\n🔸 Target Databases:")
+        for i, db in enumerate(targets, 1):
+            db_id = get_db_id(db)
+            test_result = test_results.get(db_id, {})
+            status_icon = "⏳" if not test_result else ("✅" if test_result.get('status') == 'success' else "❌")
+
+            engine_display = db['engine'].title()
+            if db.get('engine_version') and db['engine_version'] != 'Unknown':
+                engine_display += f" {db['engine_version']}"
+
+            print(f"   {i}. {db['name']} ({engine_display}) - {status_icon}")
+            print(f"      Host: {db['host']}:{db['port']}")
+            print(f"      TLS: {'Enabled' if db.get('tls') else 'Disabled'}")
+            print(f"      Source: {db.get('source', 'Unknown')}")
+            print()
+    else:
+        print("\n🔸 Target Databases: None configured")
+
+    input("\nPress Enter to continue...")
+
+def test_single_database(db_config, db_type):
+    """Test connection to a single database.
+
+    Args:
+        db_config: Database configuration dict
+        db_type: 'sources' or 'targets'
+
+    Returns:
+        True if connection successful, False otherwise
+    """
+    name = db_config['name']
+    host = db_config['host']
+    port = int(db_config['port'])
+    password = db_config.get('password', '')
+    use_tls = db_config.get('tls', False)
+
+    print(f"🔌 Testing connection to {name} ({host}:{port})...")
 
     try:
         conn_args = {
@@ -339,7 +843,7 @@ def test_redis_connection(prefix):
             "socket_timeout": 5,
             "socket_connect_timeout": 5
         }
-        if password and password.strip().lower() != "none":
+        if password and password.strip():
             conn_args["password"] = password
         if use_tls:
             conn_args["ssl"] = True
@@ -347,51 +851,149 @@ def test_redis_connection(prefix):
 
         client = redis.Redis(**conn_args)
         client.ping()
-        print(f"✅ Connection to {name} successful.\n")
+
+        # Try to get server info
+        try:
+            info = client.info('server')
+            version = info.get('redis_version', 'Unknown')
+            db_config['engine_version'] = version
+        except:
+            pass
+
+        print(f"✅ Connection to {name} successful!")
+        if db_config.get('engine_version') != 'Unknown':
+            print(f"   Version: {db_config['engine_version']}")
+
+        # Save test result
+        test_results = load_test_results()
+        db_id = get_db_id(db_config)
+        test_results[db_id] = {
+            'status': 'success',
+            'timestamp': datetime.now().isoformat(),
+            'version': db_config.get('engine_version', 'Unknown')
+        }
+        save_test_results(test_results)
+
+        return True
+
     except Exception as e:
-        print(f"❌ Connection to {name} failed: {e}\n")
+        print(f"❌ Connection to {name} failed: {e}")
+
+        # Save test result
+        test_results = load_test_results()
+        db_id = get_db_id(db_config)
+        test_results[db_id] = {
+            'status': 'failed',
+            'timestamp': datetime.now().isoformat(),
+            'error': str(e)
+        }
+        save_test_results(test_results)
+
+        return False
+
+def test_databases_menu(db_type):
+    """Show menu to test database connections.
+
+    Args:
+        db_type: 'sources' or 'targets'
+    """
+    label = "Source" if db_type == 'sources' else "Target"
+    databases = load_databases(db_type)
+
+    if not databases:
+        print(f"\n⚠️  No {label.lower()} databases configured.")
+        input("Press Enter to continue...")
+        return
+
+    while True:
+        print(f"\n🔌 Test {label} Database Connection")
+        print("=" * 60)
+        print(f"\n📍 Configured {label} Databases:")
+        print("0. Test All")
+
+        for i, db in enumerate(databases, 1):
+            test_results = load_test_results()
+            db_id = get_db_id(db)
+            test_result = test_results.get(db_id, {})
+
+            status_icon = "⏳"
+            if test_result.get('status') == 'success':
+                status_icon = "✅"
+            elif test_result.get('status') == 'failed':
+                status_icon = "❌"
+
+            print(f"{i}. {db['name']} ({db['engine'].title()}) - {status_icon}")
+
+        print(f"{len(databases) + 1}. Back")
+
+        choice = input(f"\nSelect database to test [0-{len(databases) + 1}]: ").strip()
+
+        if choice == '0':
+            # Test all
+            print(f"\n🔌 Testing all {label.lower()} databases...")
+            print("=" * 60)
+            success_count = 0
+            for db in databases:
+                if test_single_database(db, db_type):
+                    success_count += 1
+                print()
+
+            print(f"📊 Results: {success_count}/{len(databases)} successful")
+            input("\nPress Enter to continue...")
+
+        elif choice.isdigit() and 1 <= int(choice) <= len(databases):
+            # Test specific database
+            db = databases[int(choice) - 1]
+            print()
+            test_single_database(db, db_type)
+            input("\nPress Enter to continue...")
+
+        elif choice == str(len(databases) + 1):
+            break
+        else:
+            print("❌ Invalid choice.")
 
 def export_configuration():
-    """Export current Redis configuration to a JSON file."""
-    print("\n📤 Export Redis Configuration")
-    print("=" * 40)
+    """Export current database configurations to a JSON file."""
+    print("\n📤 Export Configuration")
+    print("=" * 60)
 
-    # Get current configuration
+    sources = load_databases('sources')
+    targets = load_databases('targets')
+
+    # Check if there's any configuration to export
+    if not sources and not targets:
+        print("⚠️  No database configurations found to export.")
+        print("   Please configure at least one database first.")
+        input("\nPress Enter to continue...")
+        return
+
+    # Prepare configuration (without passwords for security)
     config = {
         "metadata": {
             "exported_at": datetime.now().isoformat(),
-            "exported_by": "Redis Migration Tool",
-            "version": "1.0"
+            "exported_by": "Redis/Valkey Migration Tool",
+            "version": "2.0"
         },
-        "source": {
-            "name": os.getenv("REDIS_SOURCE_NAME", ""),
-            "host": os.getenv("REDIS_SOURCE_HOST", ""),
-            "port": os.getenv("REDIS_SOURCE_PORT", "6379"),
-            "tls": os.getenv("REDIS_SOURCE_TLS", "false"),
-            "db": os.getenv("REDIS_SOURCE_DB", "0")
-        },
-        "destination": {
-            "name": os.getenv("REDIS_DEST_NAME", ""),
-            "host": os.getenv("REDIS_DEST_HOST", ""),
-            "port": os.getenv("REDIS_DEST_PORT", "6379"),
-            "tls": os.getenv("REDIS_DEST_TLS", "false"),
-            "db": os.getenv("REDIS_DEST_DB", "0")
-        },
-        "settings": {
-            "timeout": os.getenv("REDIS_TIMEOUT", "5"),
-            "log_level": os.getenv("LOG_LEVEL", "INFO")
-        }
+        "sources": [],
+        "targets": []
     }
 
-    # Check if there's any configuration to export
-    if not config["source"]["host"] and not config["destination"]["host"]:
-        print("⚠️  No Redis configuration found to export.")
-        print("   Please configure at least one Redis connection first.")
-        return
+    # Export sources (without passwords)
+    for db in sources:
+        db_export = db.copy()
+        db_export['password'] = ''  # Don't export passwords
+        config['sources'].append(db_export)
+
+    # Export targets (without passwords)
+    for db in targets:
+        db_export = db.copy()
+        db_export['password'] = ''  # Don't export passwords
+        config['targets'].append(db_export)
 
     # Generate default filename
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    default_filename = f"redis_config_{timestamp}.json"
+    default_filename = f"migration_config_{timestamp}.json"
 
     # Get filename from user
     filename = input(f"Export filename [{default_filename}]: ").strip()
@@ -407,27 +1009,28 @@ def export_configuration():
         with open(filename, 'w') as f:
             json.dump(config, f, indent=2)
 
-        print(f"✅ Configuration exported to: {filename}")
+        print(f"\n✅ Configuration exported to: {filename}")
         print(f"📁 File size: {os.path.getsize(filename)} bytes")
         print()
         print("📋 Exported configuration includes:")
-        if config["source"]["host"]:
-            print(f"   🔗 Source: {config['source']['name']} ({config['source']['host']})")
-        if config["destination"]["host"]:
-            print(f"   🔗 Destination: {config['destination']['name']} ({config['destination']['host']})")
+        print(f"   🔹 Source databases: {len(sources)}")
+        print(f"   🔸 Target databases: {len(targets)}")
         print("   ⚠️  Note: Passwords are NOT exported for security reasons")
         print()
 
     except Exception as e:
         print(f"❌ Failed to export configuration: {e}")
 
+    input("\nPress Enter to continue...")
+
 def import_configuration():
-    """Import Redis configuration from a JSON file."""
-    print("\n📥 Import Redis Configuration")
-    print("=" * 40)
+    """Import database configurations from a JSON file."""
+    print("\n📥 Import Configuration")
+    print("=" * 60)
 
     # List available JSON files
-    json_files = [f for f in os.listdir('.') if f.endswith('.json') and f.startswith('redis_config')]
+    json_files = [f for f in os.listdir('.') if f.endswith('.json') and
+                  (f.startswith('migration_config') or f.startswith('redis_config'))]
 
     if json_files:
         print("📁 Available configuration files:")
@@ -452,12 +1055,15 @@ def import_configuration():
                     filename = json_files[int(choice) - 1]
                 else:
                     print("❌ Invalid selection.")
+                    input("\nPress Enter to continue...")
                     return
             except:
                 print("❌ Invalid selection.")
+                input("\nPress Enter to continue...")
                 return
         else:
             print("❌ No configuration files found.")
+            input("\nPress Enter to continue...")
             return
 
     # Ensure .json extension
@@ -467,17 +1073,13 @@ def import_configuration():
     # Check if file exists
     if not os.path.exists(filename):
         print(f"❌ File not found: {filename}")
+        input("\nPress Enter to continue...")
         return
 
     try:
         # Read configuration from file
         with open(filename, 'r') as f:
             config = json.load(f)
-
-        # Validate configuration structure
-        if not isinstance(config, dict) or 'source' not in config or 'destination' not in config:
-            print("❌ Invalid configuration file format.")
-            return
 
         print(f"✅ Configuration loaded from: {filename}")
 
@@ -486,92 +1088,129 @@ def import_configuration():
         if config.get('metadata', {}).get('exported_at'):
             print(f"   📅 Exported: {config['metadata']['exported_at']}")
 
-        source = config.get('source', {})
-        dest = config.get('destination', {})
+        sources = config.get('sources', [])
+        targets = config.get('targets', [])
 
-        if source.get('host'):
-            print(f"   🔗 Source: {source.get('name', 'Unnamed')} ({source.get('host')}:{source.get('port', '6379')})")
-        if dest.get('host'):
-            print(f"   🔗 Destination: {dest.get('name', 'Unnamed')} ({dest.get('host')}:{dest.get('port', '6379')})")
+        print(f"   🔹 Source databases: {len(sources)}")
+        for db in sources:
+            print(f"      - {db.get('name', 'Unnamed')} ({db.get('engine', 'unknown').title()})")
+
+        print(f"   🔸 Target databases: {len(targets)}")
+        for db in targets:
+            print(f"      - {db.get('name', 'Unnamed')} ({db.get('engine', 'unknown').title()})")
 
         # Confirm import
-        print("\n⚠️  This will overwrite your current configuration!")
-        confirm = input("Continue with import? (y/N): ").strip().lower()
+        print("\n⚠️  Import options:")
+        print("1. Replace all (clear existing and import)")
+        print("2. Merge (add to existing)")
+        print("3. Cancel")
 
-        if confirm != 'y':
+        import_choice = input("\nSelect option [1-3]: ").strip()
+
+        if import_choice == '3':
             print("❌ Import cancelled.")
+            input("\nPress Enter to continue...")
+            return
+        elif import_choice == '1':
+            # Replace all
+            save_databases('sources', sources)
+            save_databases('targets', targets)
+            print("\n✅ Configuration replaced successfully!")
+        elif import_choice == '2':
+            # Merge
+            existing_sources = load_databases('sources')
+            existing_targets = load_databases('targets')
+
+            existing_sources.extend(sources)
+            existing_targets.extend(targets)
+
+            save_databases('sources', existing_sources)
+            save_databases('targets', existing_targets)
+            print("\n✅ Configuration merged successfully!")
+        else:
+            print("❌ Invalid choice.")
+            input("\nPress Enter to continue...")
             return
 
-        # Import source configuration
-        if source.get('host'):
-            set_key(ENV_PATH, "REDIS_SOURCE_NAME", source.get('name', ''))
-            set_key(ENV_PATH, "REDIS_SOURCE_HOST", source.get('host', ''))
-            set_key(ENV_PATH, "REDIS_SOURCE_PORT", source.get('port', '6379'))
-            set_key(ENV_PATH, "REDIS_SOURCE_TLS", source.get('tls', 'false'))
-            set_key(ENV_PATH, "REDIS_SOURCE_DB", source.get('db', '0'))
-
-        # Import destination configuration
-        if dest.get('host'):
-            set_key(ENV_PATH, "REDIS_DEST_NAME", dest.get('name', ''))
-            set_key(ENV_PATH, "REDIS_DEST_HOST", dest.get('host', ''))
-            set_key(ENV_PATH, "REDIS_DEST_PORT", dest.get('port', '6379'))
-            set_key(ENV_PATH, "REDIS_DEST_TLS", dest.get('tls', 'false'))
-            set_key(ENV_PATH, "REDIS_DEST_DB", dest.get('db', '0'))
-
-        # Import settings
-        settings = config.get('settings', {})
-        if settings.get('timeout'):
-            set_key(ENV_PATH, "REDIS_TIMEOUT", settings.get('timeout', '5'))
-        if settings.get('log_level'):
-            set_key(ENV_PATH, "LOG_LEVEL", settings.get('log_level', 'INFO'))
-
-        # Reload environment
-        reload_env()
-
-        print("✅ Configuration imported successfully!")
         print("⚠️  Remember to set passwords manually for security reasons.")
-        print()
 
     except json.JSONDecodeError:
         print("❌ Invalid JSON file format.")
     except Exception as e:
         print(f"❌ Failed to import configuration: {e}")
 
-def main():
-    print("🔐 Redis Environment Configuration Tool")
+    input("\nPress Enter to continue...")
 
+def main():
+    """Main menu for database configuration tool."""
     while True:
-        show_current_config()
-        print("Choose an option:")
-        print("1. Configure Source Redis (AWS ElastiCache)")
-        print("2. Configure Destination Redis (Redis Cloud)")
-        print("3. Manual Source Redis Setup")
-        print("4. Test Source Redis")
-        print("5. Test Destination Redis")
-        print("6. Export Configuration")
-        print("7. Import Configuration")
-        print("8. Exit")
-        choice = input("Enter choice [1-8]: ").strip()
+        sources = load_databases('sources')
+        targets = load_databases('targets')
+        test_results = load_test_results()
+
+        # Count tested databases
+        sources_tested = sum(1 for db in sources if test_results.get(get_db_id(db), {}).get('status') == 'success')
+        targets_tested = sum(1 for db in targets if test_results.get(get_db_id(db), {}).get('status') == 'success')
+
+        print("\n" + "=" * 60)
+        print("🔐 Redis/Valkey Migration Configuration Tool")
+        print("=" * 60)
+
+        print("\n📊 Quick Overview:")
+        if sources:
+            print(f"   🔹 Sources: {len(sources)} configured ({sources_tested} tested ✅, {len(sources) - sources_tested} untested ⏳)")
+        else:
+            print(f"   🔹 Sources: None configured")
+
+        if targets:
+            print(f"   🔸 Targets: {len(targets)} configured ({targets_tested} tested ✅, {len(targets) - targets_tested} untested ⏳)")
+        else:
+            print(f"   🔸 Targets: None configured")
+
+        print("\nMain Menu:")
+        print(f"1. Source Databases ({len(sources)} configured)")
+        print(f"2. Target Databases ({len(targets)} configured)")
+        print(f"3. Export/Import Configuration")
+        print(f"4. View All Configurations")
+        print(f"5. Exit")
+
+        choice = input("\nSelect option [1-5]: ").strip()
 
         if choice == "1":
-            setup_source_connection()
+            manage_databases_menu('sources')
         elif choice == "2":
-            setup_destination_connection()
+            manage_databases_menu('targets')
         elif choice == "3":
-            setup_connection("REDIS_SOURCE")
+            export_import_menu()
         elif choice == "4":
-            test_redis_connection("REDIS_SOURCE")
+            view_all_configurations()
         elif choice == "5":
-            test_redis_connection("REDIS_DEST")
-        elif choice == "6":
-            export_configuration()
-        elif choice == "7":
-            import_configuration()
-        elif choice == "8":
-            print("✅ Exiting config tool.")
+            print("\n✅ Exiting configuration tool.")
+            print("💡 Your configurations are saved in .env file")
             break
         else:
             print("❌ Invalid choice, try again.")
+
+def export_import_menu():
+    """Menu for export/import operations."""
+    while True:
+        print("\n📦 Export/Import Configuration")
+        print("=" * 60)
+        print("\nOptions:")
+        print("1. Export Configuration to File")
+        print("2. Import Configuration from File")
+        print("3. Back to Main Menu")
+
+        choice = input("\nSelect option [1-3]: ").strip()
+
+        if choice == "1":
+            export_configuration()
+        elif choice == "2":
+            import_configuration()
+        elif choice == "3":
+            break
+        else:
+            print("❌ Invalid choice.")
 
 def test_parsers():
     """Test the parsing functions with sample inputs."""
