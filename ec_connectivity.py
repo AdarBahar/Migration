@@ -2,15 +2,16 @@
 """
 ElastiCache Connectivity Doctor
 
-Interactive tool to troubleshoot connectivity between THIS EC2 instance and an AWS ElastiCache for Redis endpoint.
-- Prompts for ElastiCache URI/connection details interactively
+Interactive tool to troubleshoot connectivity between THIS EC2 instance and an AWS ElastiCache endpoint.
+- Supports both Redis and Valkey databases
+- Can load databases from .env file or accept manual input
 - Discovers EC2 networking (VPC, subnet, SGs, routes, NACLs)
 - Finds the target ElastiCache replication group / cluster
 - Checks DNS, TCP, TLS reachability
 - Compares SG rules and suggests or applies minimal fixes
 
 Supports various input formats:
-- redis-cli commands: redis6-cli --tls -h host.cache.amazonaws.com -p 6379 -c
+- redis-cli/valkey-cli commands: redis6-cli --tls -h host.cache.amazonaws.com -p 6379 -c
 - Redis URLs: redis://host:port or rediss://host:port (TLS)
 - Host:port format: host.cache.amazonaws.com:6379
 - Host only: host.cache.amazonaws.com (defaults to port 6379)
@@ -18,6 +19,7 @@ Supports various input formats:
 
 import ipaddress
 import json
+import os
 import re
 import socket
 import ssl
@@ -28,6 +30,12 @@ from typing import Dict, List, Optional, Tuple
 import boto3
 import botocore
 import requests
+from dotenv import load_dotenv
+from input_utils import get_input, get_yes_no, get_number, print_header as print_header_util
+
+# Load environment variables
+ENV_PATH = ".env"
+load_dotenv(ENV_PATH)
 
 IMDS_BASE = "http://169.254.169.254"
 IMDS_TOKEN_TTL = "21600"
@@ -65,58 +73,170 @@ def print_header(title: str):
     print(title)
     print("=" * 80)
 
+def load_databases():
+    """Load all configured databases from .env file."""
+    sources_json = os.getenv('MIGRATION_SOURCES', '[]')
+    targets_json = os.getenv('MIGRATION_TARGETS', '[]')
+
+    try:
+        sources = json.loads(sources_json)
+        targets = json.loads(targets_json)
+    except json.JSONDecodeError:
+        sources = []
+        targets = []
+
+    all_databases = []
+
+    # Add sources with label
+    for db in sources:
+        db_copy = db.copy()
+        db_copy['db_type'] = 'Source'
+        all_databases.append(db_copy)
+
+    # Add targets with label
+    for db in targets:
+        db_copy = db.copy()
+        db_copy['db_type'] = 'Target'
+        all_databases.append(db_copy)
+
+    return all_databases
+
+def select_database_from_env():
+    """Select a database from .env configuration."""
+    all_databases = load_databases()
+
+    if not all_databases:
+        return None
+
+    print("\n📦 Configured Databases in .env:")
+    print("=" * 80)
+
+    for i, db in enumerate(all_databases, 1):
+        db_type_label = db.get('db_type', 'Unknown')
+        engine = db.get('engine', 'unknown').title()
+        version = db.get('engine_version', '')
+        name = db.get('name', 'Unnamed')
+        host = db.get('host', '')
+        port = db.get('port', '')
+
+        version_str = f" {version}" if version else ""
+        print(f"{i}. [{db_type_label}] {name} ({engine}{version_str})")
+        print(f"   {host}:{port}")
+
+    print(f"{len(all_databases) + 1}. Enter connection details manually")
+    print("=" * 80)
+
+    while True:
+        try:
+            choice = get_input(f"\nSelect database [1-{len(all_databases) + 1}]")
+
+            if not choice:
+                print("❌ Please enter a database number")
+                continue
+
+            index = int(choice)
+
+            if index == len(all_databases) + 1:
+                # Manual entry
+                return None
+
+            if index < 1 or index > len(all_databases):
+                print(f"❌ Invalid selection. Please enter a number between 1 and {len(all_databases) + 1}")
+                continue
+
+            selected = all_databases[index - 1]
+
+            # Confirm selection
+            print(f"\n✅ Selected: {selected['name']} ({selected.get('engine', 'unknown').title()})")
+
+            if get_yes_no("Proceed with this database?", default=True):
+                # Convert to config format
+                return {
+                    'host': selected['host'],
+                    'port': int(selected['port']),
+                    'tls': selected.get('tls', False),
+                    'engine': selected.get('engine', 'redis'),
+                    'name': selected['name']
+                }
+            else:
+                print("Selection cancelled. Please select again.")
+                continue
+
+        except ValueError:
+            print("❌ Invalid input. Please enter a number")
+        except KeyboardInterrupt:
+            print("\n\n❌ Cancelled by user")
+            return None
+
 def get_user_input():
     """Interactive function to get ElastiCache connection details from user."""
     print("🚀 ElastiCache Connectivity Doctor")
     print("=" * 50)
     print("\nThis tool will help diagnose connectivity issues between this EC2 instance")
-    print("and your ElastiCache Redis endpoint.\n")
+    print("and your ElastiCache Redis/Valkey endpoint.\n")
 
-    print("📝 Enter your ElastiCache connection details:")
-    print("   You can provide:")
-    print("   • Redis CLI command: redis6-cli --tls -h host.cache.amazonaws.com -p 6379")
-    print("   • Redis URL: redis://host:port or rediss://host:port")
-    print("   • Host:port: host.cache.amazonaws.com:6379")
-    print("   • Host only: host.cache.amazonaws.com (defaults to port 6379)")
-    print()
+    # Try to load from .env first
+    db_config = select_database_from_env()
 
-    while True:
-        try:
-            # Get URI/connection string
-            uri_input = input("🔗 Enter ElastiCache URI/connection string: ").strip()
-            if not uri_input:
-                print("❌ Please enter a valid URI or connection string.")
-                continue
+    if db_config:
+        # Database selected from .env
+        host = db_config['host']
+        port = db_config['port']
+        tls = db_config['tls']
+        engine = db_config.get('engine', 'redis')
 
-            # Parse the input
+        print(f"\n✅ Using database from .env:")
+        print(f"   Name: {db_config.get('name', 'Unknown')}")
+        print(f"   Engine: {engine.title()}")
+        print(f"   Host: {host}")
+        print(f"   Port: {port}")
+        print(f"   TLS: {'Enabled' if tls else 'Disabled'}")
+    else:
+        # Manual entry
+        print("\n📝 Enter your ElastiCache connection details:")
+        print("   You can provide:")
+        print("   • Redis/Valkey CLI command: redis6-cli --tls -h host.cache.amazonaws.com -p 6379")
+        print("   • Redis URL: redis://host:port or rediss://host:port")
+        print("   • Host:port: host.cache.amazonaws.com:6379")
+        print("   • Host only: host.cache.amazonaws.com (defaults to port 6379)")
+        print()
+
+        while True:
             try:
-                host, port, tls = parse_uri_or_command(uri_input)
-                print(f"✅ Parsed connection: {host}:{port} {'(TLS enabled)' if tls else '(TLS disabled)'}")
-                break
-            except ValueError as e:
-                print(f"❌ Could not parse input: {e}")
-                print("   Please try a different format.")
-                continue
+                # Get URI/connection string
+                uri_input = get_input("🔗 Enter ElastiCache URI/connection string")
+                if not uri_input:
+                    print("❌ Please enter a valid URI or connection string.")
+                    continue
 
-        except KeyboardInterrupt:
-            print("\n\n👋 Exiting...")
-            sys.exit(0)
+                # Parse the input
+                try:
+                    host, port, tls = parse_uri_or_command(uri_input)
+                    print(f"✅ Parsed connection: {host}:{port} {'(TLS enabled)' if tls else '(TLS disabled)'}")
+                    break
+                except ValueError as e:
+                    print(f"❌ Could not parse input: {e}")
+                    print("   Please try a different format.")
+                    continue
+
+            except KeyboardInterrupt:
+                print("\n\n👋 Exiting...")
+                sys.exit(0)
 
     # Get additional options
     print("\n⚙️ Additional Options:")
 
     # TLS override
     if not tls:
-        tls_input = input("🔒 Force TLS connection? (y/N): ").strip().lower()
-        if tls_input in ('y', 'yes'):
+        if get_yes_no("🔒 Force TLS connection?", default=False):
             tls = True
             print("✅ TLS enabled")
 
     # Port override
-    port_input = input(f"🔌 Override port (current: {port}): ").strip()
-    if port_input:
+    port_override = get_input(f"🔌 Override port (current: {port}, press Enter to keep)")
+    if port_override:
         try:
-            new_port = int(port_input)
+            new_port = int(port_override)
             if 1 <= new_port <= 65535:
                 port = new_port
                 print(f"✅ Port set to {port}")
@@ -126,21 +246,15 @@ def get_user_input():
             print("⚠️ Invalid port number, keeping current port")
 
     # Region override
-    region_input = input("🌍 AWS region override (leave empty for auto-detection): ").strip()
-    region = region_input if region_input else None
+    region = get_input("🌍 AWS region override (leave empty for auto-detection)")
+    if not region:
+        region = None
 
     # Apply fixes option
-    apply_fixes_input = input("🔧 Apply security group fixes automatically? (y/N): ").strip().lower()
-    apply_fixes = apply_fixes_input in ('y', 'yes')
+    apply_fixes = get_yes_no("🔧 Apply security group fixes automatically?", default=False)
 
     # Timeout
-    timeout_input = input("⏱️ Connection timeout in seconds (default: 3): ").strip()
-    try:
-        timeout = int(timeout_input) if timeout_input else 3
-        if timeout < 1:
-            timeout = 3
-    except ValueError:
-        timeout = 3
+    timeout = get_number("⏱️ Connection timeout in seconds", min_val=1, max_val=60, default=3)
 
     print(f"\n📋 Configuration Summary:")
     print(f"   Host: {host}")
@@ -150,8 +264,7 @@ def get_user_input():
     print(f"   Apply fixes: {'Yes' if apply_fixes else 'No'}")
     print(f"   Timeout: {timeout}s")
 
-    confirm = input("\n✅ Proceed with these settings? (Y/n): ").strip().lower()
-    if confirm in ('n', 'no'):
+    if not get_yes_no("\n✅ Proceed with these settings?", default=True):
         print("👋 Exiting...")
         sys.exit(0)
 
@@ -200,7 +313,7 @@ def get_instance_identity_doc() -> Dict:
 def parse_uri_or_command(s: str) -> Tuple[str, int, bool]:
     """
     Accepts:
-      - redis/redis6-cli ... -h host -p 6379 [--tls|-tls|-ssl]
+      - redis/redis6-cli/valkey-cli ... -h host -p 6379 [--tls|-tls|-ssl]
       - rediss://host:port
       - redis://host:port
       - plain host:port
@@ -217,8 +330,8 @@ def parse_uri_or_command(s: str) -> Tuple[str, int, bool]:
         port = int(m.group(3)) if m.group(3) else 6379
         return host, port, scheme == "rediss"
 
-    # redis-cli style
-    if "redis" in s and (" -h " in s or " -p " in s):
+    # redis-cli or valkey-cli style
+    if ("redis" in s.lower() or "valkey" in s.lower()) and (" -h " in s or " -p " in s):
         host = None
         port = 6379
         tls = False
@@ -358,9 +471,10 @@ def get_nacls_for_subnet(ec2, subnet_id: str) -> List[Dict]:
 def find_elasticache_target(ecc, host: str, port: int) -> Dict:
     """
     Try to match host to a replication group config endpoint or cluster node endpoint.
-    Returns a dict with keys: type ('replication-group'|'cluster'|'unknown'), and details.
+    Supports both Redis and Valkey engines.
+    Returns a dict with keys: type ('replication-group'|'cluster'|'unknown'), engine, and details.
     """
-    # Try replication groups
+    # Try replication groups (used by both Redis and Valkey)
     try:
         paginator = ecc.get_paginator("describe_replication_groups")
         for page in paginator.paginate():
@@ -370,7 +484,17 @@ def find_elasticache_target(ecc, host: str, port: int) -> Dict:
                     # Only check port if it's explicitly provided in the endpoint
                     endpoint_port = cep.get("Port")
                     if endpoint_port is not None and int(endpoint_port) == port:
-                        return {"type": "replication-group", "object": rg}
+                        # Determine engine from member clusters
+                        engine = "redis"  # default
+                        if rg.get("MemberClusters"):
+                            try:
+                                member_id = rg["MemberClusters"][0]
+                                member_resp = ecc.describe_cache_clusters(CacheClusterId=member_id)
+                                member_cluster = member_resp["CacheClusters"][0]
+                                engine = member_cluster.get("Engine", "redis")
+                            except Exception:
+                                pass
+                        return {"type": "replication-group", "object": rg, "engine": engine}
 
                 # Check member clusters for endpoints
                 for member_id in rg.get("MemberClusters", []):
@@ -393,13 +517,14 @@ def find_elasticache_target(ecc, host: str, port: int) -> Dict:
                             if ep.get("Address") == host:
                                 endpoint_port = ep.get("Port")
                                 if endpoint_port is not None and int(endpoint_port) == port:
-                                    return {"type": "replication-group", "object": rg}
+                                    engine = member_cluster.get("Engine", "redis")
+                                    return {"type": "replication-group", "object": rg, "engine": engine}
                     except Exception:
                         # Skip member clusters that can't be described
                         continue
     except ecc.exceptions.ReplicationGroupNotFoundFault:
         pass
-    # Try clusters
+    # Try clusters (both Redis and Valkey)
     paginator = ecc.get_paginator("describe_cache_clusters")
     for page in paginator.paginate(ShowCacheNodeInfo=True):
         for cc in page.get("CacheClusters", []):
@@ -416,8 +541,9 @@ def find_elasticache_target(ecc, host: str, port: int) -> Dict:
                     # Only check port if it's explicitly provided in the endpoint
                     endpoint_port = ep.get("Port")
                     if endpoint_port is not None and int(endpoint_port) == port:
-                        return {"type": "cluster", "object": cc}
-    return {"type": "unknown", "object": None}
+                        engine = cc.get("Engine", "redis")
+                        return {"type": "cluster", "object": cc, "engine": engine}
+    return {"type": "unknown", "object": None, "engine": "unknown"}
 
 def _extract_cluster_port(cc: Dict) -> Optional[int]:
     """
@@ -716,7 +842,9 @@ def main():
             print("WARN: Could not match endpoint to a replication group or cluster in this region.")
             cache_net = {}
         else:
+            engine = target.get("engine", "unknown")
             print(f"Matched ElastiCache type: {target['type']}")
+            print(f"Engine: {engine.title()}")
             cache_net = collect_elasticache_networking(ecc, ec2, target)
             print(json.dumps(cache_net, indent=2))
     except botocore.exceptions.ClientError as e:
