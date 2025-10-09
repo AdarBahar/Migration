@@ -1,172 +1,357 @@
+#!/usr/bin/env python3
+"""
+Database Comparison Tool
+Compares multiple Redis/Valkey databases and shows differences in keys, data types, and values.
+"""
+
 import os
+import sys
+import json
 import redis
-import time
-import ssl
-from datetime import datetime
 from dotenv import load_dotenv
+from datetime import datetime
+from collections import defaultdict
+from input_utils import get_input, get_yes_no, print_header, print_section, pause
 
-# Load environment variables from .env
-load_dotenv(".env")
+# Load environment variables
+ENV_PATH = ".env"
+load_dotenv(ENV_PATH)
 
-# Configuration
-REFRESH_INTERVAL = 5  # seconds (default, can be overridden by user input)
-MAX_DIFF_PREVIEW = 5  # number of keys to preview
-REDIS_TIMEOUT = 5     # connection and read timeout (seconds)
+def load_databases():
+    """Load all configured databases from .env file."""
+    sources_json = os.getenv('MIGRATION_SOURCES', '[]')
+    targets_json = os.getenv('MIGRATION_TARGETS', '[]')
 
-def connect_to_redis(name, host, port, password, use_tls):
-    """Connect to Redis using provided parameters."""
-    print(f"\n⏳ Connecting to {name} Redis at {host}:{port} ...")
     try:
-        connection_kwargs = {
-            "host": host,
-            "port": int(port),
-            "decode_responses": True,
-            "socket_connect_timeout": REDIS_TIMEOUT,
-            "socket_timeout": REDIS_TIMEOUT,
-            "ssl": True if use_tls else False,
-            "ssl_cert_reqs": ssl.CERT_NONE if use_tls else None
-        }
-        if password and str(password).strip().lower() != "none":
-            connection_kwargs["password"] = password
-        connection = redis.Redis(**connection_kwargs)
-        connection.ping()
-        print(f"✅ Connected to {name} Redis\n")
-        return connection
+        sources = json.loads(sources_json)
+        targets = json.loads(targets_json)
+    except json.JSONDecodeError:
+        sources = []
+        targets = []
+
+    all_databases = []
+
+    # Add sources with label
+    for db in sources:
+        db_copy = db.copy()
+        db_copy['db_type'] = 'Source'
+        all_databases.append(db_copy)
+
+    # Add targets with label
+    for db in targets:
+        db_copy = db.copy()
+        db_copy['db_type'] = 'Target'
+        all_databases.append(db_copy)
+
+    return all_databases
+
+def connect_to_database(db_config):
+    """Connect to a Redis/Valkey database."""
+    try:
+        host = db_config['host']
+        port = int(db_config['port'])
+        password = db_config.get('password', '')
+        tls = db_config.get('tls', False)
+        db_num = int(db_config.get('db', 0))
+
+        # Create connection
+        if tls:
+            r = redis.Redis(
+                host=host,
+                port=port,
+                password=password if password else None,
+                db=db_num,
+                ssl=True,
+                ssl_cert_reqs=None,
+                decode_responses=True,
+                socket_connect_timeout=10
+            )
+        else:
+            r = redis.Redis(
+                host=host,
+                port=port,
+                password=password if password else None,
+                db=db_num,
+                decode_responses=True,
+                socket_connect_timeout=10
+            )
+
+        # Test connection
+        r.ping()
+        return r
+
+    except redis.ConnectionError as e:
+        print(f"❌ Connection failed: {e}")
+        return None
     except Exception as e:
-        print(f"❌ Failed to connect to {name} Redis: {e}")
-        exit(1)
+        print(f"❌ Error: {e}")
+        return None
 
-def scan_all_keys(redis_client):
-    """Use SCAN to safely get all keys (avoids KEYS *)."""
-    keys = set()
-    cursor = 0
-    while True:
-        cursor, batch = redis_client.scan(cursor=cursor, count=1000)
-        keys.update(batch)
-        if cursor == 0:
-            break
-    return keys
+def get_database_info(connection):
+    """Get comprehensive information about a database."""
+    info = {
+        'total_keys': 0,
+        'keys_by_type': defaultdict(int),
+        'memory_usage': 0,
+        'keys': [],
+        'sample_data': {}
+    }
 
-def get_user_interval():
-    """Prompt user for comparison interval with default of 5 seconds."""
-    print("\n⚙️ Configuration Setup")
-    print("-" * 30)
+    try:
+        # Get all keys
+        keys = connection.keys('*')
+        info['total_keys'] = len(keys)
+        info['keys'] = sorted(keys)
+
+        # Analyze each key
+        for key in keys:
+            try:
+                # Get key type
+                key_type = connection.type(key)
+                info['keys_by_type'][key_type] += 1
+
+                # Get memory usage (if available)
+                try:
+                    memory = connection.memory_usage(key)
+                    if memory:
+                        info['memory_usage'] += memory
+                except:
+                    pass
+
+                # Sample first 10 keys for detailed info
+                if len(info['sample_data']) < 10:
+                    info['sample_data'][key] = {
+                        'type': key_type,
+                        'ttl': connection.ttl(key)
+                    }
+
+                    # Get value based on type
+                    if key_type == 'string':
+                        value = connection.get(key)
+                        info['sample_data'][key]['value'] = value[:100] if len(str(value)) > 100 else value
+                    elif key_type == 'list':
+                        info['sample_data'][key]['length'] = connection.llen(key)
+                    elif key_type == 'set':
+                        info['sample_data'][key]['size'] = connection.scard(key)
+                    elif key_type == 'zset':
+                        info['sample_data'][key]['size'] = connection.zcard(key)
+                    elif key_type == 'hash':
+                        info['sample_data'][key]['fields'] = connection.hlen(key)
+
+            except Exception as e:
+                continue
+
+        return info
+
+    except Exception as e:
+        print(f"❌ Error getting database info: {e}")
+        return info
+
+def compare_databases(db_infos):
+    """Compare multiple databases and show differences."""
+    print("\n" + "=" * 80)
+    print("📊 DATABASE COMPARISON RESULTS")
+    print("=" * 80)
+
+    # Summary comparison
+    print("\n📋 Summary:")
+    print("-" * 80)
+    print(f"{'Database':<30} {'Total Keys':<15} {'Memory (bytes)':<20} {'Types'}")
+    print("-" * 80)
+
+    for db_name, info in db_infos.items():
+        types_str = ", ".join([f"{k}:{v}" for k, v in info['keys_by_type'].items()])
+        print(f"{db_name:<30} {info['total_keys']:<15} {info['memory_usage']:<20} {types_str}")
+
+    # Key differences
+    print("\n🔍 Key Differences:")
+    print("-" * 80)
+
+    all_keys = set()
+    for info in db_infos.values():
+        all_keys.update(info['keys'])
+
+    # Find keys unique to each database
+    for db_name, info in db_infos.items():
+        db_keys = set(info['keys'])
+        unique_keys = db_keys - set().union(*[set(other_info['keys'])
+                                               for other_name, other_info in db_infos.items()
+                                               if other_name != db_name])
+
+        if unique_keys:
+            print(f"\n📍 Keys only in {db_name}: {len(unique_keys)}")
+            for key in sorted(list(unique_keys)[:10]):
+                print(f"   • {key}")
+            if len(unique_keys) > 10:
+                print(f"   ... and {len(unique_keys) - 10} more")
+
+    # Find common keys
+    common_keys = set(db_infos[list(db_infos.keys())[0]]['keys'])
+    for info in db_infos.values():
+        common_keys &= set(info['keys'])
+
+    if common_keys:
+        print(f"\n✅ Common keys across all databases: {len(common_keys)}")
+        for key in sorted(list(common_keys)[:10]):
+            print(f"   • {key}")
+        if len(common_keys) > 10:
+            print(f"   ... and {len(common_keys) - 10} more")
+    else:
+        print("\n⚠️  No common keys found across all databases")
+
+def select_databases_to_compare(all_databases):
+    """Interactive selection of databases to compare."""
+    if not all_databases:
+        print("❌ No databases configured!")
+        print("💡 Use 'python3 manage_env.py' to configure databases")
+        return []
+
+    print("\n📦 Available Databases:")
+    print("=" * 80)
+
+    for i, db in enumerate(all_databases, 1):
+        db_type_label = db.get('db_type', 'Unknown')
+        engine = db.get('engine', 'unknown').title()
+        version = db.get('engine_version', '')
+        name = db.get('name', 'Unnamed')
+        host = db.get('host', '')
+        port = db.get('port', '')
+
+        version_str = f" {version}" if version else ""
+        print(f"{i}. [{db_type_label}] {name} ({engine}{version_str})")
+        print(f"   {host}:{port}")
+
+    print("\n" + "=" * 80)
+    print("Select databases to compare (minimum 2)")
+    print("Enter numbers separated by commas (e.g., 1,2,3)")
+    print("Or enter 'all' to compare all databases")
+    print("=" * 80)
 
     while True:
         try:
-            user_input = input("🕒 Enter comparison interval in seconds (default: 5): ").strip()
+            choice = get_input("\nYour selection: ").strip()
 
-            # Use default if empty input
-            if not user_input:
-                interval = 5
-                print(f"✅ Using default interval: {interval} seconds")
-                return interval
+            if choice.lower() == 'all':
+                return all_databases
 
-            # Parse user input
-            interval = float(user_input)
+            # Parse comma-separated numbers
+            indices = [int(x.strip()) for x in choice.split(',')]
 
-            # Validate range
-            if interval < 0.5:
-                print("⚠️ Interval too short. Minimum is 0.5 seconds.")
-                continue
-            elif interval > 300:
-                print("⚠️ Interval too long. Maximum is 300 seconds (5 minutes).")
+            # Validate indices
+            if len(indices) < 2:
+                print("❌ Please select at least 2 databases to compare")
                 continue
 
-            print(f"✅ Using interval: {interval} seconds")
-            return interval
+            if any(i < 1 or i > len(all_databases) for i in indices):
+                print(f"❌ Invalid selection. Please enter numbers between 1 and {len(all_databases)}")
+                continue
+
+            # Get selected databases
+            selected = [all_databases[i-1] for i in indices]
+
+            # Confirm selection
+            print("\n✅ Selected databases:")
+            for db in selected:
+                print(f"   • {db['name']} ({db.get('engine', 'unknown').title()})")
+
+            if get_yes_no("\nProceed with comparison?", default=True):
+                return selected
+            else:
+                print("Selection cancelled. Please select again.")
+                continue
 
         except ValueError:
-            print("❌ Invalid input. Please enter a number.")
+            print("❌ Invalid input. Please enter numbers separated by commas")
         except KeyboardInterrupt:
-            print("\n\n👋 Exiting...")
-            exit(0)
+            print("\n\n❌ Cancelled by user")
+            return []
 
-def get_redis_stats(redis_client):
-    """Fetch all keys using SCAN and return table info."""
-    try:
-        keys = scan_all_keys(redis_client)
-        tables = set(key.split(":")[0] for key in keys)
-        return len(tables), len(keys), keys
-    except Exception as e:
-        print(f"⚠️ Error fetching Redis stats: {e}")
-        return 0, 0, set()
+def main():
+    """Main function for database comparison."""
+    print("=" * 80)
+    print("🔍 Redis/Valkey Database Comparison Tool")
+    print("=" * 80)
 
-def compare_dbs(source, dest, name1, name2, interval=5.0):
-    """Live comparison loop between two Redis databases."""
-    while True:
-        print("🔄 Fetching stats...", end="\r")
+    # Load databases from .env
+    all_databases = load_databases()
 
-        # Fetch stats
-        tables1, keys1, set1 = get_redis_stats(source)
-        tables2, keys2, set2 = get_redis_stats(dest)
+    if not all_databases:
+        print("\n❌ No databases configured in .env file")
+        print("💡 Use 'python3 manage_env.py' to configure databases")
+        return
 
-        # Diffs
-        only_in_1 = set1 - set2
-        only_in_2 = set2 - set1
+    print(f"\n📊 Found {len(all_databases)} configured database(s)")
 
-        # Timestamp
-        last_refreshed = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    # Select databases to compare
+    selected_databases = select_databases_to_compare(all_databases)
 
-        # Clear screen
-        print("\033[H\033[J", end="")
+    if not selected_databases:
+        print("\n❌ No databases selected for comparison")
+        return
 
-        # Output
-        print("\n📌 Live Redis Database Comparison")
-        print("-" * 50)
-        print(f"🔹 Source: {name1} - Tables: {tables1}, Keys: {keys1}")
-        print(f"🔹 Destination: {name2} - Tables: {tables2}, Keys: {keys2}")
+    # Connect to databases and gather information
+    print("\n🔌 Connecting to databases...")
+    db_infos = {}
+    connections = {}
 
-        if tables1 == tables2 and keys1 == keys2 and not only_in_1 and not only_in_2:
-            print("\n✅ Both databases are identical.")
-        else:
-            print("\n⚠️ Differences found:")
+    for db in selected_databases:
+        db_name = db['name']
+        print(f"\n📍 Connecting to {db_name}...")
 
-            if tables1 != tables2:
-                print(f"   - Table count differs: {tables1} vs {tables2}")
-            if keys1 != keys2:
-                print(f"   - Key count differs: {keys1} vs {keys2}")
-            if only_in_1:
-                preview = list(only_in_1)[:MAX_DIFF_PREVIEW]
-                print(f"   - Keys only in {name1} ({len(only_in_1)}): {preview}{'...' if len(only_in_1) > MAX_DIFF_PREVIEW else ''}")
-            if only_in_2:
-                preview = list(only_in_2)[:MAX_DIFF_PREVIEW]
-                print(f"   - Keys only in {name2} ({len(only_in_2)}): {preview}{'...' if len(only_in_2) > MAX_DIFF_PREVIEW else ''}")
+        conn = connect_to_database(db)
+        if not conn:
+            print(f"❌ Failed to connect to {db_name}")
+            continue
 
-        print(f"\n🕒 Last Refreshed: {last_refreshed}")
-        print(f"🔄 Refreshing in {interval} seconds...\n")
-        time.sleep(interval)
+        print(f"✅ Connected to {db_name}")
+        connections[db_name] = conn
 
-# ---- Main Execution ----
+        print(f"📊 Analyzing {db_name}...")
+        info = get_database_info(conn)
+        db_infos[db_name] = info
+        print(f"✅ Found {info['total_keys']} keys")
+
+    # Close connections
+    for conn in connections.values():
+        try:
+            conn.close()
+        except:
+            pass
+
+    if len(db_infos) < 2:
+        print("\n❌ Need at least 2 successfully connected databases to compare")
+        return
+
+    # Compare databases
+    compare_databases(db_infos)
+
+    # Export option
+    print("\n" + "=" * 80)
+
+    if get_yes_no("Export comparison results to file?", default=False):
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"db_comparison_{timestamp}.txt"
+
+        try:
+            # Redirect output to file
+            from contextlib import redirect_stdout
+
+            with open(filename, 'w') as f:
+                with redirect_stdout(f):
+                    compare_databases(db_infos)
+
+            print(f"✅ Results exported to: {filename}")
+        except Exception as e:
+            print(f"❌ Failed to export results: {e}")
+
+    print("\n✅ Comparison complete!")
+
 if __name__ == "__main__":
-    print("🚀 Starting Redis Comparison Tool with Environment Configuration")
-
-    # Get user-defined comparison interval
-    comparison_interval = get_user_interval()
-
-    # Source Redis config from .env
-    source_name = os.getenv("REDIS_SOURCE_NAME") or "Source"
-    source_host = os.getenv("REDIS_SOURCE_HOST")
-    source_port = os.getenv("REDIS_SOURCE_PORT")
-    source_password = os.getenv("REDIS_SOURCE_PASSWORD")
-    source_tls = os.getenv("REDIS_SOURCE_TLS", "false").lower() == "true"
-
-    # Destination Redis config from .env
-    dest_name = os.getenv("REDIS_DEST_NAME") or "Destination"
-    dest_host = os.getenv("REDIS_DEST_HOST")
-    dest_port = os.getenv("REDIS_DEST_PORT")
-    dest_password = os.getenv("REDIS_DEST_PASSWORD")
-    dest_tls = os.getenv("REDIS_DEST_TLS", "false").lower() == "true"
-
-    # Validate required fields
-    required = [("REDIS_SOURCE_HOST", source_host), ("REDIS_SOURCE_PORT", source_port),
-                ("REDIS_DEST_HOST", dest_host), ("REDIS_DEST_PORT", dest_port)]
-    for var, val in required:
-        if not val:
-            print(f"❌ Missing required environment variable: {var}")
-            exit(1)
-
-    # Connect and run comparison
-    redis1 = connect_to_redis(source_name, source_host, source_port, source_password, source_tls)
-    redis2 = connect_to_redis(dest_name, dest_host, dest_port, dest_password, dest_tls)
-    compare_dbs(redis1, redis2, source_name, dest_name, comparison_interval)
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("\n\n❌ Interrupted by user")
+        sys.exit(0)
+    except Exception as e:
+        print(f"\n❌ Error: {e}")
+        sys.exit(1)

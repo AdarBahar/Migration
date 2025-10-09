@@ -6,6 +6,7 @@ import re
 from datetime import datetime
 from dotenv import load_dotenv, set_key
 from getpass import getpass
+from input_utils import get_input, get_yes_no, get_number, get_choice, pause
 
 ENV_PATH = ".env"
 load_dotenv(ENV_PATH)
@@ -123,7 +124,7 @@ def setup_elasticache_redis():
     print("=" * 50)
 
     # Get friendly name
-    name = input("Database name (friendly label): ").strip()
+    name = get_input("Database name (friendly label)")
     if not name:
         print("❌ Name cannot be empty.")
         return None
@@ -142,7 +143,7 @@ def setup_elasticache_redis():
     print()
 
     while True:
-        cli_command = input("🔗 AWS redis-cli command: ").strip()
+        cli_command = get_input("🔗 AWS redis-cli command")
 
         if not cli_command:
             print("❌ Command cannot be empty. Please enter a valid redis-cli command.")
@@ -164,8 +165,7 @@ def setup_elasticache_redis():
         print(f"   🔐 TLS: {'Enabled' if parsed['tls'] else 'Disabled'}")
         print()
 
-        confirm = input("Is this information correct? (y/n): ").strip().lower()
-        if confirm == 'y':
+        if get_yes_no("Is this information correct?", default=False):
             break
         else:
             print("Please enter the command again.")

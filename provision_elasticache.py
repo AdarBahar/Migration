@@ -32,6 +32,7 @@ import sys
 import os
 from botocore.exceptions import ClientError, NoCredentialsError
 from datetime import datetime
+from input_utils import get_input, get_yes_no, get_number, get_choice
 from elasticache_config import (
     DEFAULT_CONFIG,
     get_recommended_config,
@@ -237,8 +238,7 @@ class ElastiCacheProvisioner:
                 return None
 
             # Get VPC ID
-            print("\n🔍 Enter VPC ID (or press Enter to use default VPC): ", end="")
-            vpc_id = input().strip()
+            vpc_id = get_input("\n🔍 Enter VPC ID (or press Enter to use default VPC)")
 
             if not vpc_id:
                 # Try to find default VPC
@@ -1165,22 +1165,16 @@ class ElastiCacheProvisioner:
         print("⚠️  Note: Keyspace notifications use some CPU power but enable advanced migration features")
         print()
 
-        while True:
-            try:
-                choice = input("Enable keyspace notifications for live migration? (Y/n): ").strip().lower()
-
-                if choice in ('', 'y', 'yes'):
-                    print("✅ Keyspace notifications will be enabled for live migration support")
-                    return True
-                elif choice in ('n', 'no'):
-                    print("ℹ️  Keyspace notifications will be disabled (standard migration only)")
-                    return False
-                else:
-                    print("❌ Please enter 'y' for yes or 'n' for no")
-
-            except KeyboardInterrupt:
-                print("\n\n👋 Setup cancelled by user")
-                return None
+        try:
+            result = get_yes_no("Enable keyspace notifications for live migration?", default=True)
+            if result:
+                print("✅ Keyspace notifications will be enabled for live migration support")
+            else:
+                print("ℹ️  Keyspace notifications will be disabled (standard migration only)")
+            return result
+        except KeyboardInterrupt:
+            print("\n\n👋 Setup cancelled by user")
+            return None
 
     def get_engine_selection(self):
         """Interactive engine and type selection."""
@@ -1194,7 +1188,7 @@ class ElastiCacheProvisioner:
         print()
 
         while True:
-            choice = input("Enter your choice (1-3): ").strip()
+            choice = get_input("Enter your choice (1-3)")
 
             if choice == '1':
                 return {
@@ -1270,8 +1264,7 @@ class ElastiCacheProvisioner:
 
         # Confirm before proceeding
         if interactive:
-            confirm = input(f"\n🤔 Proceed with provisioning? (y/N): ").strip().lower()
-            if confirm not in ['y', 'yes']:
+            if not get_yes_no(f"\n🤔 Proceed with provisioning?", default=False):
                 print("❌ Provisioning cancelled by user")
                 return False
 
@@ -1301,10 +1294,7 @@ class ElastiCacheProvisioner:
             print("")
 
             # Offer manual configuration
-            print("🔧 Would you like to configure VPC details manually? (y/N): ", end="")
-            manual_config = input().strip().lower()
-
-            if manual_config in ['y', 'yes']:
+            if get_yes_no("🔧 Would you like to configure VPC details manually?", default=False):
                 instance_info = self.get_manual_vpc_config()
                 if not instance_info:
                     print("❌ Manual configuration failed.")
@@ -1440,10 +1430,9 @@ class ElastiCacheProvisioner:
 
         if interactive:
             print(f"🤔 Would you like to add this ElastiCache instance to your .env file")
-            print(f"   as a Source database? (Y/n): ", end="")
-            update_env = input().strip().lower()
+            print(f"   as a Source database?")
 
-            if update_env in ['', 'y', 'yes']:
+            if get_yes_no("Add to .env file?", default=True):
                 print(f"📝 Updating .env file with ElastiCache configuration...")
                 env_updated = self.update_env_file(
                     cache_info,
