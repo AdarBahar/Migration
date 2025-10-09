@@ -48,7 +48,15 @@ def connect_to_redis(db_config):
         port = int(db_config['port'])
         password = db_config.get('password')
         db_num = int(db_config.get('db', 0))
-        tls = db_config.get('tls', 'false').lower() == 'true'
+
+        # Handle tls as both string and boolean
+        tls_value = db_config.get('tls', False)
+        if isinstance(tls_value, bool):
+            tls = tls_value
+        elif isinstance(tls_value, str):
+            tls = tls_value.lower() in ['true', '1', 'yes']
+        else:
+            tls = False
 
         connection_kwargs = {
             "host": host,
