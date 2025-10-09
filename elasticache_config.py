@@ -224,23 +224,24 @@ def get_cost_estimate(node_type, hours_per_month=730):
     
     return None
 
-def interactive_config_builder():
+def interactive_config_builder(engine='redis'):
     """Interactive configuration builder for ElastiCache."""
     print("\n🔧 ElastiCache Configuration Builder")
     print("=" * 40)
-    
+
     # Environment selection
     print("\n1. Select Environment:")
     print("   1) Development (default)")
     print("   2) Staging")
     print("   3) Production")
-    
+
     env_choice = input("\nEnter choice (1-3) [1]: ").strip() or "1"
     environment_map = {"1": "development", "2": "staging", "3": "production"}
     environment = environment_map.get(env_choice, "development")
-    
-    config = get_recommended_config(environment)
+
+    config = get_recommended_config(environment, engine)
     print(f"\n✅ Selected environment: {environment.title()}")
+    print(f"✅ Engine: {engine.title()}")
     
     # Node type selection
     print("\n2. Node Type Selection:")
@@ -283,5 +284,5 @@ def interactive_config_builder():
 
 if __name__ == "__main__":
     # Demo the configuration builder
-    config = interactive_config_builder()
+    config = interactive_config_builder('redis')  # Default to redis for demo
     print(f"\n📄 Generated configuration: {config}")

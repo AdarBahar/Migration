@@ -1125,7 +1125,7 @@ class ElastiCacheProvisioner:
         if config is None:
             if interactive:
                 print("\n🔧 Let's configure your ElastiCache instance...")
-                config = interactive_config_builder()
+                config = interactive_config_builder(engine_config['engine'])
             else:
                 config = get_recommended_config('development', engine_config['engine'])
                 print(f"📋 Using default development configuration for {engine_config['engine']}")
