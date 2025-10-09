@@ -454,17 +454,17 @@ class ElastiCacheProvisioner:
             print(f"❌ Failed to create subnet group: {e}")
             return None
 
-    def create_elasticache_serverless(self, cache_name, security_group_id, subnet_group_name):
-        """Create ElastiCache Serverless Redis cache."""
+    def create_elasticache_serverless(self, cache_name, security_group_id, subnet_group_name, engine='redis'):
+        """Create ElastiCache Serverless cache (Redis or Valkey)."""
         try:
-            print(f"🚀 Creating ElastiCache Serverless Redis cache: {cache_name}")
-            print(f"📍 Engine: Redis OSS")
+            print(f"🚀 Creating ElastiCache Serverless {engine.title()} cache: {cache_name}")
+            print(f"📍 Engine: {engine.title()}")
             print(f"📍 Type: Serverless")
 
             response = self.elasticache_client.create_serverless_cache(
                 ServerlessCacheName=cache_name,
-                Description="Migration testing",
-                Engine='redis',
+                Description=f"Migration testing - {engine.title()}",
+                Engine=engine,
                 CacheUsageLimits={
                     'DataStorage': {
                         'Maximum': 1,
@@ -480,19 +480,20 @@ class ElastiCacheProvisioner:
                     {'Key': 'Name', 'Value': f'Source-ElastiCache'},
                     {'Key': 'Purpose', 'Value': 'Migration Testing'},
                     {'Key': 'CreatedBy', 'Value': 'Migration-Tool'},
-                    {'Key': 'Environment', 'Value': 'Development'}
+                    {'Key': 'Environment', 'Value': 'Development'},
+                    {'Key': 'Engine', 'Value': engine}
                 ]
             )
 
-            print(f"✅ ElastiCache Serverless cache creation initiated: {cache_name}")
-            return {'name': cache_name, 'type': 'serverless'}
+            print(f"✅ ElastiCache Serverless {engine.title()} cache creation initiated: {cache_name}")
+            return {'name': cache_name, 'type': 'serverless', 'engine': engine}
 
         except Exception as e:
-            print(f"❌ Failed to create ElastiCache Serverless cache: {e}")
+            print(f"❌ Failed to create ElastiCache Serverless {engine.title()} cache: {e}")
             print(f"💡 Falling back to traditional cluster...")
             result = self.create_elasticache_cluster_fallback(cache_name, security_group_id, subnet_group_name)
             if result:
-                return {'name': result, 'type': 'cluster'}
+                return {'name': result, 'type': 'cluster', 'engine': engine}
             return None
 
     def create_elasticache_cluster(self, cluster_id, security_group_id, subnet_group_name,
@@ -1182,34 +1183,41 @@ class ElastiCacheProvisioner:
         print("=" * 40)
         print("Choose your ElastiCache engine and type:")
         print()
-        print("1. 🔥 Valkey (Open source Redis fork)")
-        print("2. 📦 Redis OSS - Serverless (Auto-scaling, pay-per-use)")
-        print("3. 🖥️  Redis OSS - Node-based (Traditional clusters)")
+        print("1. 🔥 Valkey - Serverless (Auto-scaling, pay-per-use)")
+        print("2. 🖥️  Valkey - Node-based (Traditional clusters)")
+        print("3. 📦 Redis OSS - Serverless (Auto-scaling, pay-per-use)")
+        print("4. 🖥️  Redis OSS - Node-based (Traditional clusters)")
         print()
 
         while True:
-            choice = get_input("Enter your choice (1-3)")
+            choice = get_input("Enter your choice (1-4)")
 
             if choice == '1':
                 return {
                     'engine': 'valkey',
-                    'type': 'cluster',
-                    'description': 'Valkey (Open source Redis fork)'
+                    'type': 'serverless',
+                    'description': 'Valkey Serverless'
                 }
             elif choice == '2':
+                return {
+                    'engine': 'valkey',
+                    'type': 'cluster',
+                    'description': 'Valkey Node-based'
+                }
+            elif choice == '3':
                 return {
                     'engine': 'redis',
                     'type': 'serverless',
                     'description': 'Redis OSS Serverless'
                 }
-            elif choice == '3':
+            elif choice == '4':
                 return {
                     'engine': 'redis',
                     'type': 'cluster',
                     'description': 'Redis OSS Node-based'
                 }
             else:
-                print("❌ Invalid choice. Please enter 1, 2, or 3.")
+                print("❌ Invalid choice. Please enter 1, 2, 3, or 4.")
 
     def provision_elasticache(self, config=None, interactive=True):
         """Main method to provision ElastiCache with proper configuration."""
@@ -1339,11 +1347,13 @@ class ElastiCacheProvisioner:
         print(f"   📍 Type: {engine_config['type'].title()}")
 
         # Create ElastiCache based on selected type
-        if engine_config['type'] == 'serverless' and engine_config['engine'] == 'redis':
+        if engine_config['type'] == 'serverless':
+            # Create serverless cache (Redis or Valkey)
             created_cache_result = self.create_elasticache_serverless(
                 cache_name,
                 security_group_id,
-                subnet_group_name
+                subnet_group_name,
+                engine_config['engine']
             )
         else:
             # Create node-based cluster (Redis OSS or Valkey)
