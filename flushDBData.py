@@ -8,6 +8,7 @@ import os
 import json
 import redis
 from dotenv import load_dotenv
+from input_utils import get_input, get_number
 
 # Load .env config
 load_dotenv(".env")
@@ -86,7 +87,7 @@ def flush_db(redis_client, db_name):
     try:
         # Ask for confirmation
         print(f"\n⚠️  WARNING: This will delete ALL data from {db_name}!")
-        confirm = input(f"Type '{db_name}' to confirm: ").strip()
+        confirm = get_input(f"Type '{db_name}' to confirm")
 
         if confirm != db_name:
             print(f"❌ Confirmation failed. Database {db_name} was NOT flushed.")
@@ -123,12 +124,11 @@ def main():
     print("0. Cancel")
 
     # Get user choice
-    try:
-        choice = input(f"\nEnter choice [0-{len(all_databases) + 1}]: ").strip()
-        choice_num = int(choice)
-    except ValueError:
-        print("❌ Invalid choice.")
-        return
+    choice_num = get_number(
+        f"\nEnter choice",
+        min_val=0,
+        max_val=len(all_databases) + 1
+    )
 
     if choice_num == 0:
         print("✅ Operation cancelled.")
@@ -137,7 +137,7 @@ def main():
     # Flush all databases
     if choice_num == len(all_databases) + 1:
         print(f"\n⚠️  WARNING: This will flush ALL {len(all_databases)} databases!")
-        confirm = input("Type 'FLUSH ALL' to confirm: ").strip()
+        confirm = get_input("Type 'FLUSH ALL' to confirm")
 
         if confirm != "FLUSH ALL":
             print("❌ Confirmation failed. No databases were flushed.")

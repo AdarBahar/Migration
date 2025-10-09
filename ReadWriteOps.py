@@ -8,6 +8,7 @@ from threading import Thread, Lock
 import ssl
 from dotenv import load_dotenv
 from datetime import datetime
+from input_utils import get_choice
 
 # Load environment variables from .env
 load_dotenv(".env")
@@ -96,7 +97,7 @@ print("\n📘 Choose which Redis to use:")
 print(f"1. {source_config['name']}")
 print(f"2. {dest_config['name']}")
 print(f"3. Both")
-choice = input("Enter choice [1/2/3]: ").strip()
+choice = get_choice("Enter choice", choices=['1', '2', '3'])
 
 selected_instances = []
 if choice == "1":
@@ -105,9 +106,6 @@ elif choice == "2":
     selected_instances = [connect_to_redis(dest_config)]
 elif choice == "3":
     selected_instances = [connect_to_redis(source_config), connect_to_redis(dest_config)]
-else:
-    print("❌ Invalid selection.")
-    exit(1)
 
 # =========================
 # 🔄 Write Keys
