@@ -9,6 +9,7 @@ import sys
 import json
 import redis
 import time
+import signal
 from dotenv import load_dotenv
 from datetime import datetime
 from collections import defaultdict
@@ -17,6 +18,13 @@ from input_utils import get_input, get_yes_no, get_number, print_header, print_s
 # Load environment variables
 ENV_PATH = ".env"
 load_dotenv(ENV_PATH)
+
+# Timeout handler for long-running operations
+class TimeoutError(Exception):
+    pass
+
+def timeout_handler(signum, frame):
+    raise TimeoutError("Operation timed out")
 
 def load_databases():
     """Load all configured databases from .env file."""
@@ -88,8 +96,16 @@ def connect_to_database(db_config):
         print(f"❌ Error: {e}")
         return None
 
-def get_database_info(connection):
-    """Get comprehensive information about a database."""
+def get_database_info(connection, timeout=60):
+    """Get comprehensive information about a database.
+
+    Args:
+        connection: Redis/Valkey connection
+        timeout: Maximum time in seconds to analyze the database (default: 60)
+
+    Returns:
+        Dictionary with database information
+    """
     info = {
         'total_keys': 0,
         'keys_by_type': defaultdict(int),
@@ -98,26 +114,39 @@ def get_database_info(connection):
         'sample_data': {}
     }
 
+    # Set up timeout handler (only on Unix-like systems)
+    old_handler = None
+    if hasattr(signal, 'SIGALRM'):
+        old_handler = signal.signal(signal.SIGALRM, timeout_handler)
+        signal.alarm(timeout)
+
     try:
         # Get all keys
         keys = connection.keys('*')
         info['total_keys'] = len(keys)
         info['keys'] = sorted(keys)
 
+        # Show progress for large databases
+        total_keys = len(keys)
+        if total_keys > 1000:
+            print(f"   ⏳ Analyzing {total_keys} keys (this may take a moment)...")
+
         # Analyze each key
+        keys_processed = 0
         for key in keys:
             try:
                 # Get key type
                 key_type = connection.type(key)
                 info['keys_by_type'][key_type] += 1
 
-                # Get memory usage (if available)
-                try:
-                    memory = connection.memory_usage(key)
-                    if memory:
-                        info['memory_usage'] += memory
-                except:
-                    pass
+                # Get memory usage (if available) - only for first 100 keys to avoid slowdown
+                if keys_processed < 100:
+                    try:
+                        memory = connection.memory_usage(key)
+                        if memory:
+                            info['memory_usage'] += memory
+                    except Exception:
+                        pass
 
                 # Sample first 10 keys for detailed info
                 if len(info['sample_data']) < 10:
@@ -139,13 +168,55 @@ def get_database_info(connection):
                     elif key_type == 'hash':
                         info['sample_data'][key]['fields'] = connection.hlen(key)
 
+                keys_processed += 1
+
+                # Show progress every 1000 keys
+                if total_keys > 1000 and keys_processed % 1000 == 0:
+                    print(f"   📊 Progress: {keys_processed}/{total_keys} keys analyzed...")
+
             except Exception as e:
                 continue
+
+        # Estimate total memory if we only sampled
+        if total_keys > 100 and info['memory_usage'] > 0:
+            # Extrapolate memory usage
+            avg_memory_per_key = info['memory_usage'] / min(100, keys_processed)
+            info['memory_usage'] = int(avg_memory_per_key * total_keys)
+            info['memory_estimated'] = True
+        else:
+            info['memory_estimated'] = False
+
+        # Cancel the alarm
+        if hasattr(signal, 'SIGALRM'):
+            signal.alarm(0)
+            if old_handler:
+                signal.signal(signal.SIGALRM, old_handler)
+
+        return info
+
+    except TimeoutError:
+        print(f"⚠️  Analysis timed out after {timeout} seconds")
+        print(f"   Partial results: {keys_processed}/{total_keys} keys analyzed")
+
+        # Cancel the alarm
+        if hasattr(signal, 'SIGALRM'):
+            signal.alarm(0)
+            if old_handler:
+                signal.signal(signal.SIGALRM, old_handler)
 
         return info
 
     except Exception as e:
         print(f"❌ Error getting database info: {e}")
+        import traceback
+        traceback.print_exc()
+
+        # Cancel the alarm
+        if hasattr(signal, 'SIGALRM'):
+            signal.alarm(0)
+            if old_handler:
+                signal.signal(signal.SIGALRM, old_handler)
+
         return info
 
 def build_comparison_output(db_infos, previous_infos=None):
@@ -179,6 +250,11 @@ def build_comparison_output(db_infos, previous_infos=None):
     for db_name, info in db_infos.items():
         types_str = ", ".join([f"{k}:{v}" for k, v in info['keys_by_type'].items()])
 
+        # Format memory with estimation indicator
+        memory_str = str(info['memory_usage'])
+        if info.get('memory_estimated', False):
+            memory_str += " (est.)"
+
         # Show delta if we have previous data
         delta_str = ""
         if previous_infos and db_name in previous_infos:
@@ -192,9 +268,9 @@ def build_comparison_output(db_infos, previous_infos=None):
             else:
                 delta_str = "➖ 0"
 
-            lines.append(f"{db_name:<30} {info['total_keys']:<15} {delta_str:<12} {info['memory_usage']:<20} {types_str}")
+            lines.append(f"{db_name:<30} {info['total_keys']:<15} {delta_str:<12} {memory_str:<20} {types_str}")
         else:
-            lines.append(f"{db_name:<30} {info['total_keys']:<15} {info['memory_usage']:<20} {types_str}")
+            lines.append(f"{db_name:<30} {info['total_keys']:<15} {memory_str:<20} {types_str}")
 
     # Key differences
     lines.append("")
