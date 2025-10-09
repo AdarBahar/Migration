@@ -471,6 +471,42 @@ class ElastiCacheProvisioner:
 
             print(f"📍 Using {len(subnet_ids)} subnets: {', '.join(subnet_ids[:3])}{'...' if len(subnet_ids) > 3 else ''}")
 
+            # Check subnet IP availability
+            try:
+                ec2 = boto3.client('ec2', region_name=self.region)
+                subnets_info = ec2.describe_subnets(SubnetIds=subnet_ids)
+
+                low_ip_subnets = []
+                for subnet in subnets_info['Subnets']:
+                    available_ips = subnet.get('AvailableIpAddressCount', 0)
+                    subnet_id = subnet['SubnetId']
+                    if available_ips < 8:
+                        low_ip_subnets.append(f"{subnet_id} ({available_ips} IPs)")
+
+                if low_ip_subnets:
+                    print(f"\n⚠️  WARNING: Some subnets have low IP availability:")
+                    for subnet_info in low_ip_subnets:
+                        print(f"   - {subnet_info}")
+                    print(f"   Serverless caches require VPC endpoints which need 8-16 IPs")
+                    print(f"   This may cause provisioning to fail")
+
+                    if not get_yes_no("\n   Continue anyway?", default=False):
+                        print(f"\n❌ Serverless cache creation cancelled")
+                        if get_yes_no("   Create node-based cache instead?", default=True):
+                            print(f"\n🔄 Switching to node-based {engine.title()} cache...")
+                            return self.create_elasticache_cluster(
+                                cache_name,
+                                security_group_id,
+                                subnet_group_name,
+                                engine=engine,
+                                node_type='cache.t3.micro',
+                                engine_version='8.0' if engine == 'valkey' else '7.1'
+                            )
+                        return None
+            except Exception as e:
+                print(f"⚠️  Could not check subnet IP availability: {e}")
+                print(f"   Proceeding with serverless cache creation...")
+
             response = self.elasticache_client.create_serverless_cache(
                 ServerlessCacheName=cache_name,
                 Description=f"Migration testing - {engine.title()}",
@@ -499,14 +535,56 @@ class ElastiCacheProvisioner:
             return {'name': cache_name, 'type': 'serverless', 'engine': engine}
 
         except Exception as e:
+            error_msg = str(e)
             print(f"❌ Failed to create ElastiCache Serverless {engine.title()} cache: {e}")
-            # Don't fallback for serverless - user explicitly chose serverless
-            print(f"💡 Serverless cache creation failed. Please check:")
-            print(f"   - VPC has at least 2 subnets in different AZs")
-            print(f"   - Security group is valid")
-            print(f"   - You have permissions to create serverless caches")
-            print(f"   - The engine '{engine}' supports serverless in your region")
-            return None
+
+            # Check for specific error conditions
+            if "Insufficient free IP addresses" in error_msg or "vpc endpoint" in error_msg.lower():
+                print(f"\n⚠️  VPC ENDPOINT IP ADDRESS ISSUE DETECTED")
+                print(f"=" * 80)
+                print(f"Your VPC subnets don't have enough free IP addresses for the VPC endpoint")
+                print(f"that serverless caches require.")
+                print(f"")
+                print(f"💡 SOLUTIONS:")
+                print(f"")
+                print(f"Option 1: Use Node-Based Cache Instead (Recommended)")
+                print(f"   - Node-based caches don't require VPC endpoints")
+                print(f"   - Use less IP addresses")
+                print(f"   - Re-run and select option 2 (Valkey Node-based)")
+                print(f"")
+                print(f"Option 2: Expand Your VPC Subnets")
+                print(f"   - Add larger CIDR blocks to your subnets")
+                print(f"   - Ensure at least 8-16 free IPs per subnet")
+                print(f"   - Then retry serverless provisioning")
+                print(f"")
+                print(f"Option 3: Use Different Subnets")
+                print(f"   - Create new subnets with larger CIDR blocks")
+                print(f"   - Use those subnets for ElastiCache")
+                print(f"=" * 80)
+
+                # Offer to create node-based instead
+                if get_yes_no("\n🔄 Would you like to create a node-based Valkey cache instead?", default=True):
+                    print(f"\n🔄 Switching to node-based Valkey cache...")
+                    return self.create_elasticache_cluster(
+                        cache_name,
+                        security_group_id,
+                        subnet_group_name,
+                        engine=engine,
+                        node_type='cache.t3.micro',
+                        engine_version='8.0'
+                    )
+                else:
+                    print(f"\n❌ Serverless cache creation cancelled")
+                    return None
+            else:
+                # Generic error handling
+                print(f"\n💡 Serverless cache creation failed. Please check:")
+                print(f"   - VPC has at least 2 subnets in different AZs")
+                print(f"   - Subnets have enough free IP addresses (8-16 per subnet)")
+                print(f"   - Security group is valid")
+                print(f"   - You have permissions to create serverless caches")
+                print(f"   - The engine '{engine}' supports serverless in your region")
+                return None
 
     def create_elasticache_cluster(self, cluster_id, security_group_id, subnet_group_name,
                                  engine='redis', node_type='cache.t3.micro', engine_version='7.1'):
