@@ -606,7 +606,7 @@ class ElastiCacheProvisioner:
             print(f"⚠️  Could not get subnet IDs from group: {e}")
             return []
 
-    def get_provisioning_progress_info(self, cache_name, is_serverless=True):
+    def get_provisioning_progress_info(self, cache_name, is_serverless=True, engine='redis'):
         """Get detailed provisioning progress information."""
         progress_info = {
             'status': 'unknown',
@@ -657,30 +657,44 @@ class ElastiCacheProvisioner:
                 if status == 'creating':
                     # Get more detailed info about nodes
                     if engine == 'valkey':
-                        # For replication groups, get node info differently
-                        cache_nodes = []
-                        node_statuses = []
+                        # For replication groups, get member cluster info
+                        member_clusters = replication_group.get('MemberClusters', [])
+
+                        progress_info['progress_steps'] = [
+                            "🖥️  Launching cache nodes for replication group",
+                            "🌐 Configuring VPC networking and subnets",
+                            "🔒 Applying security group rules",
+                            "💾 Attaching EBS volumes for persistence",
+                            "⚙️  Installing and configuring Valkey engine",
+                            "🔗 Setting up primary endpoint",
+                            "🏥 Configuring health checks and replication"
+                        ]
+
+                        if member_clusters:
+                            progress_info['progress_steps'].append(
+                                f"📊 Member clusters: {len(member_clusters)} node(s) provisioning"
+                            )
                     else:
                         # For Redis cache clusters
                         cache_nodes = cluster.get('CacheNodes', [])
                         node_statuses = [node.get('CacheNodeStatus', 'unknown') for node in cache_nodes]
 
-                    progress_info['progress_steps'] = [
-                        "🖥️  Launching EC2 instances for cache nodes",
-                        "🌐 Configuring VPC networking and subnets",
-                        "🔒 Applying security group rules",
-                        "💾 Attaching EBS volumes for persistence",
-                        "⚙️  Installing and configuring Redis",
-                        "🔗 Setting up cluster endpoints",
-                        "🏥 Configuring health checks"
-                    ]
+                        progress_info['progress_steps'] = [
+                            "🖥️  Launching EC2 instances for cache nodes",
+                            "🌐 Configuring VPC networking and subnets",
+                            "🔒 Applying security group rules",
+                            "💾 Attaching EBS volumes for persistence",
+                            "⚙️  Installing and configuring Redis",
+                            "🔗 Setting up cluster endpoints",
+                            "🏥 Configuring health checks"
+                        ]
 
-                    if cache_nodes:
-                        available_nodes = sum(1 for status in node_statuses if status == 'available')
-                        total_nodes = len(cache_nodes)
-                        progress_info['progress_steps'].append(
-                            f"📊 Cache nodes: {available_nodes}/{total_nodes} ready"
-                        )
+                        if cache_nodes:
+                            available_nodes = sum(1 for status in node_statuses if status == 'available')
+                            total_nodes = len(cache_nodes)
+                            progress_info['progress_steps'].append(
+                                f"📊 Cache nodes: {available_nodes}/{total_nodes} ready"
+                            )
 
                     progress_info['estimated_remaining'] = "5-10 minutes"
 
@@ -716,6 +730,15 @@ class ElastiCacheProvisioner:
                 "4️⃣  Initializing Redis engine",
                 "5️⃣  Setting up endpoints"
             ]
+        elif engine == 'valkey':
+            initial_steps = [
+                "1️⃣  Creating replication group configuration",
+                "2️⃣  Launching cache nodes",
+                "3️⃣  Configuring VPC networking and security groups",
+                "4️⃣  Installing Valkey engine",
+                "5️⃣  Setting up primary endpoint",
+                "6️⃣  Running health checks and validation"
+            ]
         else:
             initial_steps = [
                 "1️⃣  Creating cache cluster configuration",
@@ -736,7 +759,7 @@ class ElastiCacheProvisioner:
                 elapsed_minutes = (time.time() - start_time) / 60
 
                 # Get detailed progress information
-                progress_info = self.get_provisioning_progress_info(cache_name, is_serverless)
+                progress_info = self.get_provisioning_progress_info(cache_name, is_serverless, engine)
                 status = progress_info['status']
 
                 # Show status update with timing
@@ -824,7 +847,20 @@ class ElastiCacheProvisioner:
                 print(f"⚠️  Error checking {cache_type} status: {e}")
                 time.sleep(30)
 
+        # Timeout reached - show final status
         print(f"⏰ Timeout waiting for {cache_type} to become available after {timeout_minutes} minutes")
+        try:
+            # Get final status
+            final_progress = self.get_provisioning_progress_info(cache_name, is_serverless, engine)
+            final_status = final_progress.get('status', 'unknown')
+            print(f"❌ Final status: {final_status}")
+
+            if final_status == 'creating':
+                print(f"💡 The {cache_type} is still being created. You can check its status in the AWS Console.")
+                print(f"   It may become available after a few more minutes.")
+        except:
+            pass
+
         return None
 
     def generate_env_config(self, cache_info, cache_name):
