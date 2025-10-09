@@ -461,6 +461,16 @@ class ElastiCacheProvisioner:
             print(f"📍 Engine: {engine.title()}")
             print(f"📍 Type: Serverless")
 
+            # Get subnet IDs from the subnet group
+            subnet_ids = self.get_subnet_ids_from_group(subnet_group_name)
+
+            if not subnet_ids:
+                print(f"❌ Failed to get subnet IDs from subnet group: {subnet_group_name}")
+                print(f"💡 Cannot create serverless cache without subnet IDs")
+                return None
+
+            print(f"📍 Using {len(subnet_ids)} subnets: {', '.join(subnet_ids[:3])}{'...' if len(subnet_ids) > 3 else ''}")
+
             response = self.elasticache_client.create_serverless_cache(
                 ServerlessCacheName=cache_name,
                 Description=f"Migration testing - {engine.title()}",
@@ -475,7 +485,7 @@ class ElastiCacheProvisioner:
                     }
                 },
                 SecurityGroupIds=[security_group_id],
-                SubnetIds=self.get_subnet_ids_from_group(subnet_group_name),
+                SubnetIds=subnet_ids,
                 Tags=[
                     {'Key': 'Name', 'Value': f'Source-ElastiCache'},
                     {'Key': 'Purpose', 'Value': 'Migration Testing'},
@@ -490,10 +500,12 @@ class ElastiCacheProvisioner:
 
         except Exception as e:
             print(f"❌ Failed to create ElastiCache Serverless {engine.title()} cache: {e}")
-            print(f"💡 Falling back to traditional cluster...")
-            result = self.create_elasticache_cluster_fallback(cache_name, security_group_id, subnet_group_name)
-            if result:
-                return {'name': result, 'type': 'cluster', 'engine': engine}
+            # Don't fallback for serverless - user explicitly chose serverless
+            print(f"💡 Serverless cache creation failed. Please check:")
+            print(f"   - VPC has at least 2 subnets in different AZs")
+            print(f"   - Security group is valid")
+            print(f"   - You have permissions to create serverless caches")
+            print(f"   - The engine '{engine}' supports serverless in your region")
             return None
 
     def create_elasticache_cluster(self, cluster_id, security_group_id, subnet_group_name,
@@ -600,11 +612,24 @@ class ElastiCacheProvisioner:
             )
 
             subnet_group = response['CacheSubnetGroups'][0]
-            subnet_ids = [subnet['SubnetId'] for subnet in subnet_group['Subnets']]
+            # Handle both 'SubnetId' and 'SubnetIdentifier' keys
+            subnet_ids = []
+            for subnet in subnet_group['Subnets']:
+                # Try SubnetIdentifier first (standard key), then SubnetId
+                subnet_id = subnet.get('SubnetIdentifier') or subnet.get('SubnetId')
+                if subnet_id:
+                    subnet_ids.append(subnet_id)
+
+            if not subnet_ids:
+                print(f"⚠️  No subnet IDs found in subnet group: {subnet_group_name}")
+                return []
+
             return subnet_ids
 
         except Exception as e:
             print(f"⚠️  Could not get subnet IDs from group: {e}")
+            import traceback
+            traceback.print_exc()
             return []
 
     def get_provisioning_progress_info(self, cache_name, is_serverless=True, engine='redis'):
