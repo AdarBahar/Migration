@@ -148,6 +148,96 @@ def get_database_info(connection):
         print(f"❌ Error getting database info: {e}")
         return info
 
+def build_comparison_output(db_infos, previous_infos=None):
+    """Build comparison output as a list of lines (for continuous mode).
+
+    Args:
+        db_infos: Current database information
+        previous_infos: Previous comparison data for showing deltas
+
+    Returns:
+        List of output lines
+    """
+    lines = []
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    lines.append("")
+    lines.append("=" * 80)
+    lines.append(f"📊 DATABASE COMPARISON RESULTS - {timestamp}")
+    lines.append("=" * 80)
+
+    # Summary comparison
+    lines.append("")
+    lines.append("📋 Summary:")
+    lines.append("-" * 80)
+    if previous_infos:
+        lines.append(f"{'Database':<30} {'Total Keys':<15} {'Change':<12} {'Memory (bytes)':<20} {'Types'}")
+    else:
+        lines.append(f"{'Database':<30} {'Total Keys':<15} {'Memory (bytes)':<20} {'Types'}")
+    lines.append("-" * 80)
+
+    for db_name, info in db_infos.items():
+        types_str = ", ".join([f"{k}:{v}" for k, v in info['keys_by_type'].items()])
+
+        # Show delta if we have previous data
+        delta_str = ""
+        if previous_infos and db_name in previous_infos:
+            prev_count = previous_infos[db_name]['total_keys']
+            curr_count = info['total_keys']
+            delta = curr_count - prev_count
+            if delta > 0:
+                delta_str = f"🔼 +{delta}"
+            elif delta < 0:
+                delta_str = f"🔽 {delta}"
+            else:
+                delta_str = "➖ 0"
+
+            lines.append(f"{db_name:<30} {info['total_keys']:<15} {delta_str:<12} {info['memory_usage']:<20} {types_str}")
+        else:
+            lines.append(f"{db_name:<30} {info['total_keys']:<15} {info['memory_usage']:<20} {types_str}")
+
+    # Key differences
+    lines.append("")
+    lines.append("🔍 Key Differences:")
+    lines.append("-" * 80)
+
+    all_keys = set()
+    for info in db_infos.values():
+        all_keys.update(info['keys'])
+
+    # Find keys unique to each database
+    for db_name, info in db_infos.items():
+        db_keys = set(info['keys'])
+        unique_keys = db_keys - set().union(*[set(other_info['keys'])
+                                               for other_name, other_info in db_infos.items()
+                                               if other_name != db_name])
+
+        if unique_keys:
+            lines.append("")
+            lines.append(f"📍 Keys only in {db_name}: {len(unique_keys)}")
+            for key in sorted(list(unique_keys)[:10]):
+                lines.append(f"   • {key}")
+            if len(unique_keys) > 10:
+                lines.append(f"   ... and {len(unique_keys) - 10} more")
+
+    # Find common keys
+    common_keys = set(db_infos[list(db_infos.keys())[0]]['keys'])
+    for info in db_infos.values():
+        common_keys &= set(info['keys'])
+
+    if common_keys:
+        lines.append("")
+        lines.append(f"✅ Common keys across all databases: {len(common_keys)}")
+        for key in sorted(list(common_keys)[:10]):
+            lines.append(f"   • {key}")
+        if len(common_keys) > 10:
+            lines.append(f"   ... and {len(common_keys) - 10} more")
+    else:
+        lines.append("")
+        lines.append("⚠️  No common keys found across all databases")
+
+    return lines
+
 def compare_databases(db_infos, show_timestamp=False, previous_infos=None):
     """Compare multiple databases and show differences.
 
@@ -297,12 +387,20 @@ def select_databases_to_compare(all_databases):
             return []
 
 def continuous_compare(selected_databases, cadence=5):
-    """Continuously compare databases at specified interval.
+    """Continuously compare databases at specified interval with fixed display.
 
     Args:
         selected_databases: List of database configurations to compare
         cadence: Seconds between comparisons (default: 5)
     """
+    import sys
+
+    # ANSI escape codes for cursor control
+    CURSOR_UP = '\033[F'
+    CLEAR_LINE = '\033[K'
+    HIDE_CURSOR = '\033[?25l'
+    SHOW_CURSOR = '\033[?25h'
+
     print(f"\n🔄 Starting continuous comparison mode (every {cadence} seconds)")
     print("Press Ctrl+C to stop")
     print("=" * 80)
@@ -310,23 +408,35 @@ def continuous_compare(selected_databases, cadence=5):
     iteration = 0
     start_time = time.time()
     previous_infos = None
+    lines_printed = 0  # Track how many lines we've printed
 
     elapsed = 0
+
+    # Hide cursor for cleaner display
+    print(HIDE_CURSOR, end='')
+    sys.stdout.flush()
+
     try:
         while True:
             iteration += 1
             elapsed = time.time() - start_time
 
-            # Clear screen for better readability
-            if iteration > 1:
-                clear_screen()
+            # Move cursor back to start of dynamic content (after first iteration)
+            if iteration > 1 and lines_printed > 0:
+                # Move cursor up by the number of lines we printed
+                for _ in range(lines_printed):
+                    print(CURSOR_UP, end='')
+                sys.stdout.flush()
 
-            # Show iteration info
-            print("=" * 80)
-            print(f"🔄 Continuous Comparison - Iteration #{iteration}")
-            print(f"⏱️  Elapsed time: {int(elapsed // 60)}m {int(elapsed % 60)}s")
-            print(f"🔁 Refresh rate: {cadence} seconds")
-            print("=" * 80)
+            # Capture output to count lines
+            output_lines = []
+
+            # Header (will be updated each time)
+            output_lines.append("=" * 80 + CLEAR_LINE)
+            output_lines.append(f"🔄 Continuous Comparison - Iteration #{iteration}" + CLEAR_LINE)
+            output_lines.append(f"⏱️  Elapsed time: {int(elapsed // 60)}m {int(elapsed % 60)}s" + CLEAR_LINE)
+            output_lines.append(f"🔁 Refresh rate: {cadence} seconds" + CLEAR_LINE)
+            output_lines.append("=" * 80 + CLEAR_LINE)
 
             # Connect to databases and gather information
             db_infos = {}
@@ -339,7 +449,7 @@ def continuous_compare(selected_databases, cadence=5):
                     # Reuse connection or create new one
                     conn = connect_to_database(db)
                     if not conn:
-                        print(f"❌ Failed to connect to {db_name}")
+                        output_lines.append(f"❌ Failed to connect to {db_name}" + CLEAR_LINE)
                         continue
 
                     connections[db_name] = conn
@@ -349,7 +459,7 @@ def continuous_compare(selected_databases, cadence=5):
                     db_infos[db_name] = info
 
                 except Exception as e:
-                    print(f"❌ Error analyzing {db_name}: {e}")
+                    output_lines.append(f"❌ Error analyzing {db_name}: {e}" + CLEAR_LINE)
                     continue
 
             # Close connections
@@ -360,23 +470,44 @@ def continuous_compare(selected_databases, cadence=5):
                     pass
 
             if len(db_infos) < 2:
-                print("\n⚠️  Need at least 2 successfully connected databases")
-                print(f"Retrying in {cadence} seconds...")
+                output_lines.append("" + CLEAR_LINE)
+                output_lines.append("⚠️  Need at least 2 successfully connected databases" + CLEAR_LINE)
+                output_lines.append(f"Retrying in {cadence} seconds..." + CLEAR_LINE)
             else:
-                # Compare databases with delta information
-                compare_databases(db_infos, show_timestamp=True, previous_infos=previous_infos)
+                # Build comparison output
+                comparison_output = build_comparison_output(db_infos, previous_infos)
+                for line in comparison_output:
+                    output_lines.append(line + CLEAR_LINE)
 
                 # Store current info for next iteration's delta
                 previous_infos = db_infos
 
+            # Status line
+            output_lines.append("" + CLEAR_LINE)
+            output_lines.append(f"⏳ Next update in {cadence} seconds... (Press Ctrl+C to stop)" + CLEAR_LINE)
+
+            # Print all lines
+            for line in output_lines:
+                print(line)
+
+            lines_printed = len(output_lines)
+            sys.stdout.flush()
+
             # Wait for next iteration
-            print(f"\n⏳ Next update in {cadence} seconds... (Press Ctrl+C to stop)")
             time.sleep(cadence)
 
     except KeyboardInterrupt:
+        # Show cursor again
+        print(SHOW_CURSOR, end='')
+        sys.stdout.flush()
+
         print("\n\n✅ Continuous comparison stopped by user")
         print(f"📊 Total iterations: {iteration}")
         print(f"⏱️  Total time: {int(elapsed // 60)}m {int(elapsed % 60)}s")
+    finally:
+        # Ensure cursor is shown even if there's an error
+        print(SHOW_CURSOR, end='')
+        sys.stdout.flush()
 
 def main():
     """Main function for database comparison."""
