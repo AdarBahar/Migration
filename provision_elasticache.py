@@ -512,7 +512,7 @@ class ElastiCacheProvisioner:
                 print(f"📋 Using CreateReplicationGroup API for Valkey")
                 response = self.elasticache_client.create_replication_group(
                     ReplicationGroupId=cluster_id,
-                    Description=f'Valkey cluster for migration testing',
+                    ReplicationGroupDescription=f'Valkey cluster for migration testing',
                     Engine=engine,
                     EngineVersion=engine_version,
                     CacheNodeType=node_type,
@@ -653,8 +653,14 @@ class ElastiCacheProvisioner:
                 # Traditional cluster provisioning steps
                 if status == 'creating':
                     # Get more detailed info about nodes
-                    cache_nodes = cluster.get('CacheNodes', [])
-                    node_statuses = [node.get('CacheNodeStatus', 'unknown') for node in cache_nodes]
+                    if engine == 'valkey':
+                        # For replication groups, get node info differently
+                        cache_nodes = []
+                        node_statuses = []
+                    else:
+                        # For Redis cache clusters
+                        cache_nodes = cluster.get('CacheNodes', [])
+                        node_statuses = [node.get('CacheNodeStatus', 'unknown') for node in cache_nodes]
 
                     progress_info['progress_steps'] = [
                         "🖥️  Launching EC2 instances for cache nodes",
