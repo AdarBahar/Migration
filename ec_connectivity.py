@@ -470,10 +470,28 @@ def get_nacls_for_subnet(ec2, subnet_id: str) -> List[Dict]:
 
 def find_elasticache_target(ecc, host: str, port: int) -> Dict:
     """
-    Try to match host to a replication group config endpoint or cluster node endpoint.
+    Try to match host to a replication group, cluster, or serverless cache endpoint.
     Supports both Redis and Valkey engines.
-    Returns a dict with keys: type ('replication-group'|'cluster'|'unknown'), engine, and details.
+    Returns a dict with keys: type ('replication-group'|'cluster'|'serverless'|'unknown'), engine, and details.
     """
+    # Try serverless caches first (newer API)
+    try:
+        paginator = ecc.get_paginator("describe_serverless_caches")
+        for page in paginator.paginate():
+            for sc in page.get("ServerlessCaches", []):
+                endpoint = sc.get("Endpoint")
+                if endpoint and endpoint.get("Address") == host:
+                    endpoint_port = endpoint.get("Port")
+                    if endpoint_port is not None and int(endpoint_port) == port:
+                        engine = sc.get("Engine", "redis")
+                        return {"type": "serverless", "object": sc, "engine": engine}
+    except (ecc.exceptions.ServerlessCacheNotFoundFault, AttributeError):
+        # ServerlessCacheNotFoundFault or method doesn't exist (older boto3)
+        pass
+    except Exception as e:
+        # Log but continue - might be permission issue
+        print(f"⚠️ Could not check serverless caches: {e}")
+
     # Try replication groups (used by both Redis and Valkey)
     try:
         paginator = ecc.get_paginator("describe_replication_groups")
@@ -571,8 +589,37 @@ def collect_elasticache_networking(ecc, ec2, target: Dict) -> Dict:
     Returns: {
       'vpc_id', 'subnet_group', 'subnet_ids', 'sg_ids'
     }
+    Supports replication groups, clusters, and serverless caches.
     """
-    if target["type"] == "replication-group":
+    if target["type"] == "serverless":
+        sc = target["object"]
+        sg_ids = sc.get("SecurityGroupIds", [])
+        subnet_ids = sc.get("SubnetIds", [])
+
+        # Get VPC from subnet
+        vpc_id = None
+        if subnet_ids:
+            try:
+                subnet = ec2.describe_subnets(SubnetIds=[subnet_ids[0]])["Subnets"][0]
+                vpc_id = subnet["VpcId"]
+            except Exception:
+                pass
+
+        # Get endpoint info
+        endpoint = sc.get("Endpoint", {})
+
+        return {
+            "vpc_id": vpc_id,
+            "subnet_group": None,  # Serverless doesn't use subnet groups
+            "subnet_ids": subnet_ids,
+            "sg_ids": sg_ids,
+            "engine": sc.get("Engine", "redis"),
+            "engine_version": sc.get("FullEngineVersion", ""),
+            "port": endpoint.get("Port"),
+            "cluster_id": sc.get("ServerlessCacheName"),
+            "cache_type": "serverless"
+        }
+    elif target["type"] == "replication-group":
         rg = target["object"]
         # Need to fetch a representative member cluster to read SGs/subnet group
         member = (rg.get("MemberClusters") or [None])[0]
