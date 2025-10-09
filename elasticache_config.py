@@ -65,10 +65,15 @@ ELASTICACHE_NODE_TYPES = {
 
 # Redis Engine Versions
 REDIS_ENGINE_VERSIONS = {
-    '7.0': {
+    '7.1': {
         'features': ['Redis Functions', 'ACLs', 'Streams', 'JSON support'],
         'recommended': True,
         'description': 'Latest stable version with all features'
+    },
+    '7.0': {
+        'features': ['Redis Functions', 'ACLs', 'Streams', 'JSON support'],
+        'recommended': False,
+        'description': 'Stable version with all features'
     },
     '6.2': {
         'features': ['ACLs', 'Streams', 'Modules support'],
@@ -82,13 +87,44 @@ REDIS_ENGINE_VERSIONS = {
     }
 }
 
+# Valkey Engine Versions (Valkey uses different version numbers)
+VALKEY_ENGINE_VERSIONS = {
+    '7.2.5': {
+        'features': ['Valkey Functions', 'ACLs', 'Streams', 'JSON support'],
+        'recommended': True,
+        'description': 'Latest Valkey version with enhanced features'
+    },
+    '7.2.4': {
+        'features': ['Valkey Functions', 'ACLs', 'Streams', 'JSON support'],
+        'recommended': False,
+        'description': 'Stable Valkey version'
+    },
+    '7.0.5': {
+        'features': ['ACLs', 'Streams', 'Enhanced performance'],
+        'recommended': False,
+        'description': 'Older stable Valkey version'
+    }
+}
+
 # Default configuration
 DEFAULT_CONFIG = {
     'node_type': 'cache.t3.micro',
-    'engine_version': '7.0',
+    'engine_version': '7.1',  # Updated to latest Redis version
     'port': 6379,
     'num_cache_nodes': 1,
     'parameter_group_family': 'redis7.x',
+    'maintenance_window': 'sun:05:00-sun:06:00',
+    'snapshot_retention_limit': 1,
+    'snapshot_window': '03:00-04:00'
+}
+
+# Valkey-specific default configuration
+VALKEY_DEFAULT_CONFIG = {
+    'node_type': 'cache.t3.micro',
+    'engine_version': '7.2.5',  # Latest supported Valkey version
+    'port': 6379,
+    'num_cache_nodes': 1,
+    'parameter_group_family': 'valkey7.x',
     'maintenance_window': 'sun:05:00-sun:06:00',
     'snapshot_retention_limit': 1,
     'snapshot_window': '03:00-04:00'
@@ -103,11 +139,13 @@ SECURITY_RECOMMENDATIONS = {
     'multi_az': False  # Set to True for production
 }
 
-def get_recommended_config(environment='development'):
-    """Get recommended configuration based on environment."""
+def get_recommended_config(environment='development', engine='redis'):
+    """Get recommended configuration based on environment and engine."""
+    base_config = VALKEY_DEFAULT_CONFIG if engine == 'valkey' else DEFAULT_CONFIG
+
     if environment.lower() == 'production':
         return {
-            **DEFAULT_CONFIG,
+            **base_config,
             'node_type': 'cache.r6g.large',
             'num_cache_nodes': 2,
             'automatic_failover': True,
@@ -119,13 +157,13 @@ def get_recommended_config(environment='development'):
         }
     elif environment.lower() == 'staging':
         return {
-            **DEFAULT_CONFIG,
+            **base_config,
             'node_type': 'cache.t3.small',
             'encryption_at_rest': True,
             'snapshot_retention_limit': 3
         }
     else:  # development
-        return DEFAULT_CONFIG
+        return base_config
 
 def display_node_type_options():
     """Display available node type options."""
@@ -155,9 +193,12 @@ def validate_node_type(node_type):
     """Validate if the node type is supported."""
     return node_type in ELASTICACHE_NODE_TYPES
 
-def validate_engine_version(version):
+def validate_engine_version(version, engine='redis'):
     """Validate if the engine version is supported."""
-    return version in REDIS_ENGINE_VERSIONS
+    if engine == 'valkey':
+        return version in VALKEY_ENGINE_VERSIONS
+    else:
+        return version in REDIS_ENGINE_VERSIONS
 
 def get_cost_estimate(node_type, hours_per_month=730):
     """Get rough cost estimate for a node type (placeholder - actual costs vary by region)."""

@@ -1127,8 +1127,8 @@ class ElastiCacheProvisioner:
                 print("\n🔧 Let's configure your ElastiCache instance...")
                 config = interactive_config_builder()
             else:
-                config = get_recommended_config('development')
-                print(f"📋 Using default development configuration")
+                config = get_recommended_config('development', engine_config['engine'])
+                print(f"📋 Using default development configuration for {engine_config['engine']}")
 
         print(f"\n📋 Configuration Summary:")
         print(f"   Engine: {engine_config['engine'].title()}")
@@ -1419,7 +1419,8 @@ Examples:
                 sys.exit(1)
 
         if args.engine_version:
-            if validate_engine_version(args.engine_version):
+            # For command line, assume redis engine unless specified otherwise
+            if validate_engine_version(args.engine_version, 'redis'):
                 config['engine_version'] = args.engine_version
             else:
                 print(f"❌ Invalid engine version: {args.engine_version}")
