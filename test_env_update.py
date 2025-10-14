@@ -25,7 +25,7 @@ def create_sample_env_file():
 REDIS_DEST_NAME=destination-redis
 REDIS_DEST_HOST=localhost
 REDIS_DEST_PORT=6379
-REDIS_DEST_PASSWORD=mypassword
+REDIS_DEST_PASSWORD=
 REDIS_DEST_TLS=false
 REDIS_DEST_DB=0
 

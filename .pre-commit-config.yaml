@@ -1,0 +1,51 @@
+# Pre-commit hooks configuration
+# Install: pip install pre-commit
+# Setup: pre-commit install
+# Run manually: pre-commit run --all-files
+
+repos:
+  # Detect secrets
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.4.0
+    hooks:
+      - id: detect-secrets
+        args: ['--baseline', '.secrets.baseline']
+        exclude: package.lock.json
+
+  # Check for common security issues
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.5.0
+    hooks:
+      - id: check-added-large-files
+        args: ['--maxkb=1000']
+      - id: check-merge-conflict
+      - id: check-yaml
+      - id: check-json
+      - id: detect-private-key
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+      - id: mixed-line-ending
+
+  # Python-specific checks
+  - repo: https://github.com/PyCQA/bandit
+    rev: 1.7.5
+    hooks:
+      - id: bandit
+        args: ['-c', 'pyproject.toml']
+        additional_dependencies: ['bandit[toml]']
+
+  # Check for hardcoded passwords
+  - repo: local
+    hooks:
+      - id: check-passwords
+        name: Check for hardcoded passwords
+        entry: bash -c 'if grep -r -i "password\s*=\s*[\"'\''][^\"'\'']*[\"'\'']" --include="*.py" --exclude-dir=venv --exclude-dir=.git .; then echo "Found hardcoded password!"; exit 1; fi'
+        language: system
+        pass_filenames: false
+
+      - id: check-redis-urls
+        name: Check for Redis URLs with passwords
+        entry: bash -c 'if grep -r "redis://[^@]*:[^@]*@" --include="*.py" --exclude-dir=venv --exclude-dir=.git . | grep -v "EXAMPLE_PASSWORD\|your-password\|<password>"; then echo "Found Redis URL with password!"; exit 1; fi'
+        language: system
+        pass_filenames: false
+

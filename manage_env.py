@@ -1235,11 +1235,11 @@ def test_parsers():
         else:
             print("   ❌ Failed to parse")
 
-    # Test Redis URL parsing
+    # Test Redis URL parsing (using example passwords for demonstration)
     redis_samples = [
-        "redis://default:mypassword@redis-xxxxx.c123.region-1.ec2.redns.redis-cloud.com:12345",
-        "rediss://user:pass123@redis-yyyyy.c456.region-2.ec2.redns.redis-cloud.com:15000",
-        "redis-cli -u redis://default:secret@redis-zzzzz.c789.region-3.ec2.redns.redis-cloud.com:16000"
+        "redis://default:EXAMPLE_PASSWORD@redis-xxxxx.c123.region-1.ec2.redns.redis-cloud.com:12345",
+        "rediss://user:EXAMPLE_PASSWORD@redis-yyyyy.c456.region-2.ec2.redns.redis-cloud.com:15000",
+        "redis-cli -u redis://default:EXAMPLE_PASSWORD@redis-zzzzz.c789.region-3.ec2.redns.redis-cloud.com:16000"
     ]
 
     print("\n🔗 Redis Cloud URL Tests:")

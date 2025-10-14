@@ -64,3 +64,27 @@ venv/
 
 # Ignore environment files
 .env/
+
+# Security: Ignore files that may contain credentials
+*password*
+*secret*
+*credentials*
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Security: Ignore test environment files
+test_*.env
+.env.test
+
+# Security: Ignore ElastiCache instance files (may contain sensitive data)
+elasticache_*.json
+elasticache_*.env
+
+# Security: Ignore migration history
+.migration_history
+
+# Security: Ignore backup files
+*-backup/
+*.backup
